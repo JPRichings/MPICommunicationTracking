@@ -752,3 +752,57 @@ int MPI_Sendrecv(const void *sendbuf, int sendcount, MPI_Datatype sendtype, int 
   add_p2p_large_data(MPI_SENDRECV_TYPE, dest, my_rank, sendcount, sendtype, my_rank, dest, recvcount, recvtype);
   return PMPI_Sendrecv(sendbuf, sendcount, sendtype, dest, sendtag, recvbuf, recvcount, recvtype, source, recvtag, comm, status);
 }
+
+int MPI_Wait(MPI_Request *request, MPI_Status *status){
+  // For a Wait, we track that the local rank completed a wait event.
+  // We set sender and receiver to my_rank, and count to 0.
+  add_p2p_small_data(MPI_WAIT_TYPE, my_rank, my_rank, 0, -1);
+  return PMPI_Wait(request, status);
+}
+
+int MPI_Waitall(int count, MPI_Request array_of_requests[], MPI_Status array_of_statuses[]){
+  // We use the count variable here to track how many requests were waited on.
+  add_p2p_small_data(MPI_WAITALL_TYPE, my_rank, my_rank, count, -1);
+  return PMPI_Waitall(count, array_of_requests, array_of_statuses);
+}
+
+int MPI_Barrier(MPI_Comm comm){
+  add_p2p_small_data(MPI_BARRIER_TYPE, my_rank, my_rank, 0, -1);
+  return PMPI_Barrier(comm);
+}
+
+int MPI_Bcast(void *buffer, int count, MPI_Datatype datatype, int root, MPI_Comm comm){
+  // Bcast has a clear sender (root) and receiver (everyone else).
+  add_p2p_small_data(MPI_BCAST_TYPE, root, my_rank, count, datatype);
+  return PMPI_Bcast(buffer, count, datatype, root, comm);
+}
+
+int MPI_Reduce(const void *sendbuf, void *recvbuf, int count, MPI_Datatype datatype, MPI_Op op, int root, MPI_Comm comm){
+  // Reduce flows from the local rank to the root rank.
+  add_p2p_small_data(MPI_REDUCE_TYPE, my_rank, root, count, datatype);
+  return PMPI_Reduce(sendbuf, recvbuf, count, datatype, op, root, comm);
+}
+
+int MPI_Allreduce(const void *sendbuf, void *recvbuf, int count, MPI_Datatype datatype, MPI_Op op, MPI_Comm comm){
+  // Allreduce sends data everywhere, so we log my_rank as both.
+  add_p2p_small_data(MPI_ALLREDUCE_TYPE, my_rank, my_rank, count, datatype);
+  return PMPI_Allreduce(sendbuf, recvbuf, count, datatype, op, comm);
+}
+
+int MPI_Gather(const void *sendbuf, int sendcount, MPI_Datatype sendtype, void *recvbuf, int recvcount, MPI_Datatype recvtype, int root, MPI_Comm comm){
+  // Gather involves sending (sendcount) to the root, and the root receiving (recvcount).
+  // We use the large data struct to capture both data types and counts.
+  add_p2p_large_data(MPI_GATHER_TYPE, my_rank, root, sendcount, sendtype, root, my_rank, recvcount, recvtype);
+  return PMPI_Gather(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, root, comm);
+}
+
+int MPI_Scatter(const void *sendbuf, int sendcount, MPI_Datatype sendtype, void *recvbuf, int recvcount, MPI_Datatype recvtype, int root, MPI_Comm comm){
+  // Scatter involves root sending to the local rank.
+  add_p2p_large_data(MPI_SCATTER_TYPE, root, my_rank, sendcount, sendtype, my_rank, root, recvcount, recvtype);
+  return PMPI_Scatter(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, root, comm);
+}
+
+int MPI_Allgather(const void *sendbuf, int sendcount, MPI_Datatype sendtype, void *recvbuf, int recvcount, MPI_Datatype recvtype, MPI_Comm comm){
+  add_p2p_large_data(MPI_ALLGATHER_TYPE, my_rank, my_rank, sendcount, sendtype, my_rank, my_rank, recvcount, recvtype);
+  return PMPI_Allgather(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, comm);
+}

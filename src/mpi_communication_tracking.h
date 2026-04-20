@@ -13,6 +13,15 @@
 #define MPI_IRSEND_TYPE 21
 #define MPI_IRECV_TYPE 22
 #define MPI_SENDRECV_TYPE 23
+#define MPI_WAIT_TYPE 24
+#define MPI_WAITALL_TYPE 25
+#define MPI_BARRIER_TYPE 26
+#define MPI_BCAST_TYPE 27
+#define MPI_REDUCE_TYPE 28
+#define MPI_ALLREDUCE_TYPE 29
+#define MPI_GATHER_TYPE 30
+#define MPI_SCATTER_TYPE 31
+#define MPI_ALLGATHER_TYPE 32
 
 // Forward declarations
 int mpi_high_water_name_to_colour(const char *);
