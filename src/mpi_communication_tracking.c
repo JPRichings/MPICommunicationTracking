@@ -245,7 +245,10 @@ int MPI_Finalize(){
 
   free(number_of_small_messages);
   free(number_of_large_messages);
-  
+ 
+  MPI_Comm_free(&(node_comm.comm));
+  MPI_Comm_free(&(root_comm.comm));
+ 
   return PMPI_Finalize();
 }
 
@@ -334,17 +337,10 @@ int remove_proc_data_files(int proc_id, char *local_hostname){
   return 0;
 }
 
-
 int get_local_filename(char *filename, char *local_hostname, int proc_id){
   assert(process_id != -1);
 
-  filename[0] = '.';
-  filename[1] = '\0';
-  strcat(filename, programname);
-  strcat(filename, "-");
-  strcat(filename, local_hostname);
-  strcat(filename, "-");
-  sprintf(filename+strlen(filename), "%d", proc_id);
+  snprintf(filename, STRING_LENGTH, ".%s-%s-%d", programname, local_hostname, proc_id);
 
   return 0;
 }
