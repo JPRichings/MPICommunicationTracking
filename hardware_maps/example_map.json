@@ -1,0 +1,36 @@
+{
+  "cabinets": [
+    {
+      "id": "CAB-01",
+      "x": -50, "z": 0,
+      "racks": [
+        {
+          "id": "RACK-1",
+          "x_offset": 0, "z_offset": 0,
+          "nodes": [
+            {"hostname": "node001", "slot": 0},
+            {"hostname": "node002", "slot": 1},
+            {"hostname": "node003", "slot": 2},
+            {"hostname": "node004", "slot": 3}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "CAB-02",
+      "x": 50, "z": 0,
+      "racks": [
+        {
+          "id": "RACK-2",
+          "x_offset": 0, "z_offset": 0,
+          "nodes": [
+            {"hostname": "node005", "slot": 0},
+            {"hostname": "node006", "slot": 1},
+            {"hostname": "node007", "slot": 2},
+            {"hostname": "node008", "slot": 3}
+          ]
+        }
+      ]
+    }
+  ]
+}
