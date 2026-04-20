@@ -13,26 +13,7 @@
 
 #include "mpi_communication_tracking.h"
 
-// Forward declarations
-int mpi_high_water_name_to_colour(const char *);
-int mpi_high_water_get_key();
-void get_date_time_string(char *);
-unsigned long get_processor_and_core(int *chip, int *core);
-int open_data_files();
-int open_global_file();
-int gather_process_information();
-int write_global_information();
-int write_data_output();
-int close_data_file();
-int communicate_total_message_numbers();
-int process_data_files();
-int close_global_file();
-int get_program_name();
-int get_process_id();
-int get_local_filename(char *filename, char *hostname, int proc_id);
-int get_data_limit();
-
-double my_time; // Changed to double for precision timing
+double my_time; 
 int my_rank;
 int my_size;
 
@@ -83,7 +64,6 @@ int MPI_Init(int *argc, char ***argv){
   
   MPI_Barrier(MPI_COMM_WORLD);
 
-  // Use MPI_Wtime instead of time(NULL) for microsecond precision
   my_time = MPI_Wtime();
   
   get_program_name();
@@ -397,8 +377,11 @@ int open_global_file(){
 
 int get_program_name(){
   char *oldname = NULL, *name, *ptrprogramname;
+  ssize_t len; 
 
-  if (readlink("/proc/self/exe", programname, sizeof(programname)-1) != -1) {
+  len = readlink("/proc/self/exe", programname, sizeof(programname)-1);
+  if (len != -1) {
+    programname[len] = '\0';
     ptrprogramname = programname;
     while ((name = strsep(&ptrprogramname, "/"))){
       oldname = name;

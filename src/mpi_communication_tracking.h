@@ -14,6 +14,26 @@
 #define MPI_IRECV_TYPE 22
 #define MPI_SENDRECV_TYPE 23
 
+// Forward declarations
+int mpi_high_water_name_to_colour(const char *);
+int mpi_high_water_get_key();
+void get_date_time_string(char *);
+unsigned long get_processor_and_core(int *chip, int *core);
+int open_data_files();
+int open_global_file();
+int gather_process_information();
+int write_global_information();
+int write_data_output();
+int close_data_file();
+int communicate_total_message_numbers();
+int process_data_files();
+int close_global_file();
+int get_program_name();
+int get_process_id();
+int get_local_filename(char *filename, char *hostname, int proc_id);
+int get_data_limit();
+
+
 typedef struct p2p_small_node {
   double time;
   int id;
