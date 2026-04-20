@@ -1,0 +1,99 @@
+* {
+*     box-sizing: border-box;
+*         margin: 0;
+*             padding: 0;
+*             }
+*
+*             body {
+*                 font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+*                     background-color: #0d1117;
+*                         color: #c9d1d9;
+*                             height: 100vh;
+*                                 overflow: hidden;
+*                                 }
+*
+*                                 #app-container {
+*                                     display: flex;
+*                                         height: 100vh;
+*                                             width: 100vw;
+*                                             }
+*
+*/* Sidebar Styling */
+#sidebar {
+    width: 320px;
+    background-color: #161b22;
+    border-right: 1px solid #30363d;
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+    z-index: 10;
+    box-shadow: 2px 0 10px rgba(0,0,0,0.5);
+}
+
+.sidebar-header {
+    margin-bottom: 25px;
+    border-bottom: 1px solid #30363d;
+    padding-bottom: 15px;
+}
+
+.sidebar-header h2 { color: #58a6ff; font-size: 1.4rem; }
+.sidebar-header p { font-size: 0.85rem; color: #8b949e; }
+
+.control-group {
+    background-color: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 15px;
+    margin-bottom: 15px;
+}
+
+.control-group h3 {
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #8b949e;
+    margin-bottom: 10px;
+}
+
+/* File Loader Button Hiding the ugly default input */
+input[type="file"] { display: none; }
+.btn-load {
+    display: block;
+    text-align: center;
+    background-color: #238636;
+    color: white;
+    padding: 8px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: bold;
+    transition: background 0.2s;
+}
+.btn-load:hover { background-color: #2ea043; }
+
+/* Stats & Typography */
+.stats-panel p { font-size: 0.9rem; margin-bottom: 5px; }
+.stats-panel span { font-weight: bold; color: #58a6ff; }
+
+/* Playback Controls */
+.time-display { font-family: monospace; font-size: 1.1rem; text-align: center; margin-bottom: 10px; color: #ff7b72; }
+input[type=range] { width: 100%; margin-bottom: 10px; cursor: pointer; }
+.playback-controls { display: flex; justify-content: space-between; align-items: center; }
+button {
+    background-color: #1f6feb; color: white; border: none; padding: 6px 12px;
+    border-radius: 4px; cursor: pointer; font-weight: bold;
+}
+button:disabled { background-color: #30363d; color: #8b949e; cursor: not-allowed; }
+button:hover:not(:disabled) { background-color: #388bfd; }
+
+.inspector-panel { flex-grow: 1; overflow-y: auto; font-size: 0.85rem; line-height: 1.4; color: #a5d6ff; }
+
+/* Canvas Styling */
+#canvas-container { flex-grow: 1; position: relative; }
+svg { width: 100%; height: 100%; cursor: grab; }
+svg:active { cursor: grabbing; }
+
+/* SVG Elements */
+.node { fill: #8b949e; stroke: #c9d1d9; stroke-width: 1.5px; transition: fill 0.2s; }
+.node:hover { fill: #58a6ff; }
+.node-label { font-family: monospace; font-size: 10px; fill: #ffffff; pointer-events: none; text-anchor: middle; dominant-baseline: central; }
+.link { stroke: #ff7b72; stroke-opacity: 0.8; stroke-linecap: round; }

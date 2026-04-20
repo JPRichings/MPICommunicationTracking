@@ -1,13 +1,54 @@
-<div class="controls">
-    <label for="profileLoader">Load MPI Profile:</label>
-    <input type="file" id="profileLoader" accept=".json">
-    
-    <input type="range" id="timeSlider" min="0" max="100" value="0" step="0.1" disabled>
-</div>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MPI Communication Tracker</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+</head>
+<body>
+    <div id="app-container">
+        <aside id="sidebar">
+            <div class="sidebar-header">
+                <h2>MPI Profiler</h2>
+                <p>Network & Topology Visualiiser</p>
+            </div>
 
-<svg id="networkGraph" width="800" height="600"></svg>
+            <div class="control-group">
+                <label for="profileLoader" class="btn-load">📂 Load .json Profile</label>
+                <input type="file" id="profileLoader" accept=".json">
+            </div>
 
-<input type="range" id="timeSlider" min="0" max="100" value="0" step="0.1">
-<svg id="networkGraph" width="800" height="600"></svg>
-<script src="https://d3js.org/d3.v7.min.js"></script>
-<script src="visualizer.js"></script>
+            <div class="control-group stats-panel">
+                <h3>Run Statistics</h3>
+                <p>Total Ranks: <span id="stat-ranks">-</span></p>
+                <p>Total Events: <span id="stat-events">-</span></p>
+                <p>Duration: <span id="stat-duration">-</span> sec</p>
+            </div>
+
+            <div class="control-group playback-panel">
+                <h3>Timeline</h3>
+                <div class="time-display">T: <span id="currentTimeLabel">0.000</span> s</div>
+                <input type="range" id="timeSlider" min="0" max="100" value="0" step="0.001" disabled>
+                <div class="playback-controls">
+                    <button id="btn-play" disabled>▶ Play</button>
+                    <label>Speed: <input type="range" id="speedSlider" min="0.1" max="5" value="1" step="0.1"></label>
+                </div>
+            </div>
+
+            <div class="control-group inspector-panel">
+                <h3>Inspector</h3>
+                <div id="inspector-content">Hover over a node or active communication link to see details.</div>
+            </div>
+        </aside>
+
+        <main id="canvas-container">
+            <svg id="visCanvas"></svg>
+        </main>
+    </div>
+
+    <script src="visualiiser.js"></script>
+</body>
+</html>
+
