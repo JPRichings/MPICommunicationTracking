@@ -225,6 +225,7 @@ function renderActiveCommunications() {
     const packetGeometry = new THREE.BoxGeometry(2.5, 2.5, 2.5);
     const packetMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
 
+
     activeEvents.forEach(event => {
         const sender = nodeMap.get(event.sender);
         const receiver = nodeMap.get(event.receiver);
@@ -252,7 +253,6 @@ function renderActiveCommunications() {
                 linesGroup.add(line);
             }
             
-            // Flight time now exactly matches our tiny dynamic window
             const ageOfMessage = currentTime - event.time;
             let progress = ageOfMessage / DYNAMIC_WINDOW;
             
@@ -275,7 +275,7 @@ function renderActiveCommunications() {
             data.mesh.material.emissive.setHex(0x000000);
         }
     });
-}}
+}
 
 function handleManualSeek(event) {
     pausePlayback();
