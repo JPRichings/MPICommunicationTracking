@@ -61,8 +61,8 @@ def calculate_message_stats(timeline):
             stats[call] = dict(bins_template)
 
         # Sort into logarithmic bins
-        if bytes_transfered < 128:
-             stats[call]"< 128B"] += 1
+        if bytes_transferred < 128:
+             stats[call]["< 128B"] += 1
         elif bytes_transferred < 1024:
             stats[call]["128B < 1KB"] += 1
         elif bytes_transferred < 65536:
