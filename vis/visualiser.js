@@ -253,11 +253,26 @@ function renderActiveCommunications() {
             
             // Calculate exactly how old this specific message is within the window
             const ageOfMessage = currentTime - event.time;
+           
+            const FLIGHT_TIME = TIME_WINDOW * 0.15; 
             
-            // Convert that age into a percentage (0.0 = just sent, 1.0 = just arrived)
-            let progress = ageOfMessage / TIME_WINDOW;
-            progress = Math.max(0, Math.min(1, progress)); // Clamp between 0 and 1
-            
+            let progress = ageOfMessage / FLIGHT_TIME;
+ 
+            // Only draw the ball if it hasn't reached the destination yet
+            if (progress <= 1.0) {
+                // Get exact point on the curve
+                const packetPos = curve.getPoint(progress);
+                
+                // Draw the packet
+                const packet = new THREE.Mesh(packetGeometry, packetMaterial);
+                packet.position.copy(packetPos);
+                linesGroup.add(packet);
+            }
+
+            // Highlight the sender (Blue) and receiver (Green) nodes
+            sender.mesh.material.emissive.setHex(0x1f6feb); 
+            receiver.mesh.material.emissive.setHex(0x2ea043);           
+ 
             // Get the exact point on the curve for this percentage
             const packetPos = curve.getPoint(progress);
             
@@ -265,10 +280,6 @@ function renderActiveCommunications() {
             const packet = new THREE.Mesh(packetGeometry, packetMaterial);
             packet.position.copy(packetPos);
             linesGroup.add(packet);
-
-            // Highlight the sender (Blue) and receiver (Green) nodes
-            sender.mesh.material.emissive.setHex(0x1f6feb); 
-            receiver.mesh.material.emissive.setHex(0x2ea043); 
         }
     });
 
