@@ -218,6 +218,45 @@ def parse_mpic_file(mpic_filepath, hw_filepath=None):
     print(f"Parsed {len(data['timeline'])} communication events.")
     print(f"Data saved to {output_filename}")
 
+    # Print the terminal summary table
+    print_summary_table(data["statistics"])
+
+def print_summary_table(stats):
+    """Prints a formatted ASCII table of the message statistics to the terminal."""
+    print("\n" + "="*85)
+    print(" MPI COMMUNICATION SUMMARY")
+    print("="*85)
+    
+    if not stats:
+        print(" No communication events found.")
+        print("="*85 + "\n")
+        return
+
+    # Define columns
+    bins = ["< 128B", "128B < 1KB", "1KB - 64KB", "64KB - 1MB", "1MB - 16MB", "> 16MB"]
+    
+    # Print Header
+    header = f" {'MPI Call':<13} | " + " | ".join([f"{b:<10}" for b in bins]) + " | {'Total':<8}"
+    print(header)
+    print("-" * len(header))
+    
+    # Print Data Rows
+    for call, bin_data in stats.items():
+        # Strip "MPI_" prefix to save space, just like in the visualizer
+        short_call = call.replace("MPI_", "") 
+        row_str = f" {short_call:<13} | "
+        
+        total = 0
+        for b in bins:
+            count = bin_data.get(b, 0)
+            total += count
+            row_str += f"{count:<10} | "
+            
+        row_str += f"{total:<8}"
+        print(row_str)
+        
+    print("="*85 + "\n")
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python parse_mpic.py <filename.mpic> [hardware_map.json]")
