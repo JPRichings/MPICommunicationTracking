@@ -110,33 +110,129 @@ function initDashboard() {
     seekToTime(0);
 }
 
+// Add a hostname map to the top of your file with the other globals
+let hostnameMap = new Map();
+
 function buildHardwareTopology(nodesData) {
     const nodeGeometry = new THREE.BoxGeometry(8, 8, 8);
-    const nodeMaterial = new THREE.MeshPhongMaterial({ color: 0x8b949e, emissive: 0x222222 });
-
-    let maxY = 0; // We will use this to find the highest node
-
-    nodesData.forEach(d => {
-        const mesh = new THREE.Mesh(nodeGeometry, nodeMaterial);
-        mesh.position.set(d.x, d.y, d.z);
-        mesh.name = "mpiNode";
-        
-        scene.add(mesh);
-        nodeMap.set(d.rank, { x: d.x, y: d.y, z: d.z, mesh: mesh });
-
-        // Track the highest Y coordinate
-        if (d.y > maxY) maxY = d.y; 
+    
+    // Aesthetic Materials
+    const idleMaterial = new THREE.MeshPhongMaterial({ 
+        color: 0x161b22, transparent: true, opacity: 0.4, 
+        specular: 0x222222, shininess: 10 
+    });
+    const allocatedMaterial = new THREE.MeshPhongMaterial({ 
+        color: 0x8b949e, emissive: 0x000000 
     });
 
-    // Find the middle height of your rack
-    const centerY = maxY / 2; 
-    
-    // Move the camera up to the middle, and pull it back based on how tall the rack is
-    camera.position.set(0, centerY, maxY > 0 ? maxY : 150); 
-    
-    // Tell the orbit controls to look at the center instead of the floor
+    let maxY = 0;
+    hostnameMap.clear();
+
+    // Draw the Datacenter Floor Grid
+    const gridHelper = new THREE.GridHelper(1000, 50, 0x30363d, 0x161b22);
+    gridHelper.position.y = -10; // Put it slightly beneath the lowest node
+    scene.add(gridHelper);
+
+    // Draw the full hardware blueprint (Idle Nodes & Racks)
+    if (parsedData.hardware_blueprint && parsedData.hardware_blueprint.cabinets) {
+        parsedData.hardware_blueprint.cabinets.forEach(cab => {
+            cab.racks.forEach(rack => {
+                const rackGroup = new THREE.Group();
+                scene.add(rackGroup);
+
+                rack.nodes.forEach(node => {
+                    const x = cab.x + rack.x_offset;
+                    const y = node.slot * 12; // Height
+                    const z = cab.z + rack.z_offset;
+
+                    // Create idle node
+                    const mesh = new THREE.Mesh(nodeGeometry, idleMaterial.clone());
+                    mesh.position.set(x, y, z);
+                    mesh.name = "mpiNode";
+                    rackGroup.add(mesh);
+
+                    // Track highest Y for camera centering
+                    if (y > maxY) maxY = y;
+
+                    // Save to hostname map so we can find it later
+                    hostnameMap.set(node.hostname, { x, y, z, mesh: mesh, rank: null });
+                });
+
+                // Wrap the Rack in a visible wireframe bounding box
+                const rackBox = new THREE.BoxHelper(rackGroup, 0x30363d);
+                scene.add(rackBox);
+            });
+        });
+    }
+
+    // Highlight the Allocated MPI Ranks
+    nodesData.forEach(d => {
+        let target = hostnameMap.get(d.hostname);
+        
+        if (target) {
+            // Upgrade the material from "Idle" to "Allocated"
+            target.mesh.material = allocatedMaterial.clone();
+            target.rank = d.rank;
+            // Map the Rank ID to this specific mesh for line drawing
+            nodeMap.set(d.rank, target);
+        } else {
+            // Fallback: If hardware map is missing, just draw them randomly
+            const mesh = new THREE.Mesh(nodeGeometry, allocatedMaterial.clone());
+            mesh.position.set(d.x, d.y, d.z);
+            scene.add(mesh);
+            nodeMap.set(d.rank, { x: d.x, y: d.y, z: d.z, mesh: mesh });
+        }
+    });
+
+    // Center Camera
+    const centerY = maxY / 2;
+    camera.position.set(0, centerY, maxY > 0 ? maxY * 1.2 : 150);
     controls.target.set(0, centerY, 0);
     controls.update();
+}
+
+function renderActiveCommunications() {
+    clearLines();
+
+    const activeEvents = parsedData.timeline.filter(d => 
+        d.time <= currentTime && d.time >= (currentTime - TIME_WINDOW)
+        && d.sender !== d.receiver 
+    );
+
+    // Using AdditiveBlending makes the lines look like glowing lasers
+    const material = new THREE.LineBasicMaterial({ 
+        color: 0x58a6ff, 
+        transparent: true, 
+        opacity: 0.9,
+        blending: THREE.AdditiveBlending 
+    });
+
+    activeEvents.forEach(event => {
+        const sender = nodeMap.get(event.sender);
+        const receiver = nodeMap.get(event.receiver);
+
+        if (sender && receiver) {
+            const points = [];
+            points.push(new THREE.Vector3(sender.x, sender.y, sender.z));
+            points.push(new THREE.Vector3(receiver.x, receiver.y, receiver.z));
+
+            const geometry = new THREE.BufferGeometry().setFromPoints(points);
+            const line = new THREE.Line(geometry, material);
+            linesGroup.add(line);
+            
+            // Highlight the sender and receiver nodes
+            sender.mesh.material.emissive.setHex(0x1f6feb); // Blue glow
+            receiver.mesh.material.emissive.setHex(0x2ea043); // Green glow
+        }
+    });
+
+    // Reset glow for nodes that stopped communicating
+    nodeMap.forEach((data, rank) => {
+        const isActive = activeEvents.some(e => e.sender === rank || e.receiver === rank);
+        if (!isActive) {
+            data.mesh.material.emissive.setHex(0x000000);
+        }
+    });
 }
 
 function handleManualSeek(event) {
