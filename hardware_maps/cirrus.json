@@ -1,0 +1,1154 @@
+{
+  "cabinets": [
+    {
+      "id": "CAB-01",
+      "x": 0,
+      "z": 0,
+      "racks": [
+        {
+          "id": "RACK-x1000sw00",
+          "x_offset": 0,
+          "z_offset": 0,
+          "nodes": [
+            {
+              "hostname": "cs-n0000",
+              "slot": 0
+            },
+            {
+              "hostname": "cs-n0001",
+              "slot": 1
+            },
+            {
+              "hostname": "cs-n0002",
+              "slot": 2
+            },
+            {
+              "hostname": "cs-n0003",
+              "slot": 3
+            },
+            {
+              "hostname": "cs-n0004",
+              "slot": 4
+            },
+            {
+              "hostname": "cs-n0005",
+              "slot": 5
+            },
+            {
+              "hostname": "cs-n0006",
+              "slot": 6
+            },
+            {
+              "hostname": "cs-n0007",
+              "slot": 7
+            },
+            {
+              "hostname": "cs-n0008",
+              "slot": 8
+            },
+            {
+              "hostname": "cs-n0009",
+              "slot": 9
+            },
+            {
+              "hostname": "cs-n0010",
+              "slot": 10
+            },
+            {
+              "hostname": "cs-n0011",
+              "slot": 11
+            },
+            {
+              "hostname": "cs-n0012",
+              "slot": 12
+            },
+            {
+              "hostname": "cs-n0013",
+              "slot": 13
+            },
+            {
+              "hostname": "cs-n0014",
+              "slot": 14
+            },
+            {
+              "hostname": "cs-n0015",
+              "slot": 15
+            }
+          ]
+        },
+        {
+          "id": "RACK-x1000sw01",
+          "x_offset": 20,
+          "z_offset": 0,
+          "nodes": [
+            {
+              "hostname": "cs-n0016",
+              "slot": 0
+            },
+            {
+              "hostname": "cs-n0017",
+              "slot": 1
+            },
+            {
+              "hostname": "cs-n0018",
+              "slot": 2
+            },
+            {
+              "hostname": "cs-n0019",
+              "slot": 3
+            },
+            {
+              "hostname": "cs-n0020",
+              "slot": 4
+            },
+            {
+              "hostname": "cs-n0021",
+              "slot": 5
+            },
+            {
+              "hostname": "cs-n0022",
+              "slot": 6
+            },
+            {
+              "hostname": "cs-n0023",
+              "slot": 7
+            },
+            {
+              "hostname": "cs-n0024",
+              "slot": 8
+            },
+            {
+              "hostname": "cs-n0025",
+              "slot": 9
+            },
+            {
+              "hostname": "cs-n0026",
+              "slot": 10
+            },
+            {
+              "hostname": "cs-n0027",
+              "slot": 11
+            },
+            {
+              "hostname": "cs-n0028",
+              "slot": 12
+            },
+            {
+              "hostname": "cs-n0029",
+              "slot": 13
+            },
+            {
+              "hostname": "cs-n0030",
+              "slot": 14
+            },
+            {
+              "hostname": "cs-n0031",
+              "slot": 15
+            }
+          ]
+        },
+        {
+          "id": "RACK-x1000sw02",
+          "x_offset": 40,
+          "z_offset": 0,
+          "nodes": [
+            {
+              "hostname": "cs-n0032",
+              "slot": 0
+            },
+            {
+              "hostname": "cs-n0033",
+              "slot": 1
+            },
+            {
+              "hostname": "cs-n0034",
+              "slot": 2
+            },
+            {
+              "hostname": "cs-n0035",
+              "slot": 3
+            },
+            {
+              "hostname": "cs-n0036",
+              "slot": 4
+            },
+            {
+              "hostname": "cs-n0037",
+              "slot": 5
+            },
+            {
+              "hostname": "cs-n0038",
+              "slot": 6
+            },
+            {
+              "hostname": "cs-n0039",
+              "slot": 7
+            },
+            {
+              "hostname": "cs-n0040",
+              "slot": 8
+            },
+            {
+              "hostname": "cs-n0041",
+              "slot": 9
+            },
+            {
+              "hostname": "cs-n0042",
+              "slot": 10
+            },
+            {
+              "hostname": "cs-n0043",
+              "slot": 11
+            },
+            {
+              "hostname": "cs-n0044",
+              "slot": 12
+            },
+            {
+              "hostname": "cs-n0045",
+              "slot": 13
+            },
+            {
+              "hostname": "cs-n0046",
+              "slot": 14
+            },
+            {
+              "hostname": "cs-n0047",
+              "slot": 15
+            }
+          ]
+        },
+        {
+          "id": "RACK-x1000sw03",
+          "x_offset": 60,
+          "z_offset": 0,
+          "nodes": [
+            {
+              "hostname": "cs-n0048",
+              "slot": 0
+            },
+            {
+              "hostname": "cs-n0049",
+              "slot": 1
+            },
+            {
+              "hostname": "cs-n0050",
+              "slot": 2
+            },
+            {
+              "hostname": "cs-n0051",
+              "slot": 3
+            },
+            {
+              "hostname": "cs-n0052",
+              "slot": 4
+            },
+            {
+              "hostname": "cs-n0053",
+              "slot": 5
+            },
+            {
+              "hostname": "cs-n0054",
+              "slot": 6
+            },
+            {
+              "hostname": "cs-n0055",
+              "slot": 7
+            },
+            {
+              "hostname": "cs-n0056",
+              "slot": 8
+            },
+            {
+              "hostname": "cs-n0057",
+              "slot": 9
+            },
+            {
+              "hostname": "cs-n0058",
+              "slot": 10
+            },
+            {
+              "hostname": "cs-n0059",
+              "slot": 11
+            },
+            {
+              "hostname": "cs-n0060",
+              "slot": 12
+            },
+            {
+              "hostname": "cs-n0061",
+              "slot": 13
+            },
+            {
+              "hostname": "cs-n0062",
+              "slot": 14
+            },
+            {
+              "hostname": "cs-n0063",
+              "slot": 15
+            }
+          ]
+        },
+        {
+          "id": "RACK-x1000sw04",
+          "x_offset": 80,
+          "z_offset": 0,
+          "nodes": [
+            {
+              "hostname": "cs-n0064",
+              "slot": 0
+            },
+            {
+              "hostname": "cs-n0065",
+              "slot": 1
+            },
+            {
+              "hostname": "cs-n0066",
+              "slot": 2
+            },
+            {
+              "hostname": "cs-n0067",
+              "slot": 3
+            },
+            {
+              "hostname": "cs-n0068",
+              "slot": 4
+            },
+            {
+              "hostname": "cs-n0069",
+              "slot": 5
+            },
+            {
+              "hostname": "cs-n0070",
+              "slot": 6
+            },
+            {
+              "hostname": "cs-n0071",
+              "slot": 7
+            },
+            {
+              "hostname": "cs-n0072",
+              "slot": 8
+            },
+            {
+              "hostname": "cs-n0073",
+              "slot": 9
+            },
+            {
+              "hostname": "cs-n0074",
+              "slot": 10
+            },
+            {
+              "hostname": "cs-n0075",
+              "slot": 11
+            },
+            {
+              "hostname": "cs-n0076",
+              "slot": 12
+            },
+            {
+              "hostname": "cs-n0077",
+              "slot": 13
+            },
+            {
+              "hostname": "cs-n0078",
+              "slot": 14
+            },
+            {
+              "hostname": "cs-n0079",
+              "slot": 15
+            }
+          ]
+        },
+        {
+          "id": "RACK-x1000sw05",
+          "x_offset": 100,
+          "z_offset": 0,
+          "nodes": [
+            {
+              "hostname": "cs-n0080",
+              "slot": 0
+            },
+            {
+              "hostname": "cs-n0081",
+              "slot": 1
+            },
+            {
+              "hostname": "cs-n0082",
+              "slot": 2
+            },
+            {
+              "hostname": "cs-n0083",
+              "slot": 3
+            },
+            {
+              "hostname": "cs-n0084",
+              "slot": 4
+            },
+            {
+              "hostname": "cs-n0085",
+              "slot": 5
+            },
+            {
+              "hostname": "cs-n0086",
+              "slot": 6
+            },
+            {
+              "hostname": "cs-n0087",
+              "slot": 7
+            },
+            {
+              "hostname": "cs-n0088",
+              "slot": 8
+            },
+            {
+              "hostname": "cs-n0089",
+              "slot": 9
+            },
+            {
+              "hostname": "cs-n0090",
+              "slot": 10
+            },
+            {
+              "hostname": "cs-n0091",
+              "slot": 11
+            },
+            {
+              "hostname": "cs-n0092",
+              "slot": 12
+            },
+            {
+              "hostname": "cs-n0093",
+              "slot": 13
+            },
+            {
+              "hostname": "cs-n0094",
+              "slot": 14
+            },
+            {
+              "hostname": "cs-n0095",
+              "slot": 15
+            }
+          ]
+        },
+        {
+          "id": "RACK-x1000sw06",
+          "x_offset": 120,
+          "z_offset": 0,
+          "nodes": [
+            {
+              "hostname": "cs-n0096",
+              "slot": 0
+            },
+            {
+              "hostname": "cs-n0097",
+              "slot": 1
+            },
+            {
+              "hostname": "cs-n0098",
+              "slot": 2
+            },
+            {
+              "hostname": "cs-n0099",
+              "slot": 3
+            },
+            {
+              "hostname": "cs-n0100",
+              "slot": 4
+            },
+            {
+              "hostname": "cs-n0101",
+              "slot": 5
+            },
+            {
+              "hostname": "cs-n0102",
+              "slot": 6
+            },
+            {
+              "hostname": "cs-n0103",
+              "slot": 7
+            },
+            {
+              "hostname": "cs-n0104",
+              "slot": 8
+            },
+            {
+              "hostname": "cs-n0105",
+              "slot": 9
+            },
+            {
+              "hostname": "cs-n0106",
+              "slot": 10
+            },
+            {
+              "hostname": "cs-n0107",
+              "slot": 11
+            },
+            {
+              "hostname": "cs-n0108",
+              "slot": 12
+            },
+            {
+              "hostname": "cs-n0109",
+              "slot": 13
+            },
+            {
+              "hostname": "cs-n0110",
+              "slot": 14
+            },
+            {
+              "hostname": "cs-n0111",
+              "slot": 15
+            }
+          ]
+        },
+        {
+          "id": "RACK-x1000sw07",
+          "x_offset": 140,
+          "z_offset": 0,
+          "nodes": [
+            {
+              "hostname": "cs-n0112",
+              "slot": 0
+            },
+            {
+              "hostname": "cs-n0113",
+              "slot": 1
+            },
+            {
+              "hostname": "cs-n0114",
+              "slot": 2
+            },
+            {
+              "hostname": "cs-n0115",
+              "slot": 3
+            },
+            {
+              "hostname": "cs-n0116",
+              "slot": 4
+            },
+            {
+              "hostname": "cs-n0117",
+              "slot": 5
+            },
+            {
+              "hostname": "cs-n0118",
+              "slot": 6
+            },
+            {
+              "hostname": "cs-n0119",
+              "slot": 7
+            },
+            {
+              "hostname": "cs-n0120",
+              "slot": 8
+            },
+            {
+              "hostname": "cs-n0121",
+              "slot": 9
+            },
+            {
+              "hostname": "cs-n0122",
+              "slot": 10
+            },
+            {
+              "hostname": "cs-n0123",
+              "slot": 11
+            },
+            {
+              "hostname": "cs-n0124",
+              "slot": 12
+            },
+            {
+              "hostname": "cs-n0125",
+              "slot": 13
+            },
+            {
+              "hostname": "cs-n0126",
+              "slot": 14
+            },
+            {
+              "hostname": "cs-n0127",
+              "slot": 15
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "CAB-02",
+      "x": 100,
+      "z": 0,
+      "racks": [
+        {
+          "id": "RACK-x1000sw08",
+          "x_offset": 0,
+          "z_offset": 0,
+          "nodes": [
+            {
+              "hostname": "cs-n0128",
+              "slot": 0
+            },
+            {
+              "hostname": "cs-n0129",
+              "slot": 1
+            },
+            {
+              "hostname": "cs-n0130",
+              "slot": 2
+            },
+            {
+              "hostname": "cs-n0131",
+              "slot": 3
+            },
+            {
+              "hostname": "cs-n0132",
+              "slot": 4
+            },
+            {
+              "hostname": "cs-n0133",
+              "slot": 5
+            },
+            {
+              "hostname": "cs-n0134",
+              "slot": 6
+            },
+            {
+              "hostname": "cs-n0135",
+              "slot": 7
+            },
+            {
+              "hostname": "cs-n0136",
+              "slot": 8
+            },
+            {
+              "hostname": "cs-n0137",
+              "slot": 9
+            },
+            {
+              "hostname": "cs-n0138",
+              "slot": 10
+            },
+            {
+              "hostname": "cs-n0139",
+              "slot": 11
+            },
+            {
+              "hostname": "cs-n0140",
+              "slot": 12
+            },
+            {
+              "hostname": "cs-n0141",
+              "slot": 13
+            },
+            {
+              "hostname": "cs-n0142",
+              "slot": 14
+            },
+            {
+              "hostname": "cs-n0143",
+              "slot": 15
+            }
+          ]
+        },
+        {
+          "id": "RACK-x1000sw09",
+          "x_offset": 20,
+          "z_offset": 0,
+          "nodes": [
+            {
+              "hostname": "cs-n0144",
+              "slot": 0
+            },
+            {
+              "hostname": "cs-n0145",
+              "slot": 1
+            },
+            {
+              "hostname": "cs-n0146",
+              "slot": 2
+            },
+            {
+              "hostname": "cs-n0147",
+              "slot": 3
+            },
+            {
+              "hostname": "cs-n0148",
+              "slot": 4
+            },
+            {
+              "hostname": "cs-n0149",
+              "slot": 5
+            },
+            {
+              "hostname": "cs-n0150",
+              "slot": 6
+            },
+            {
+              "hostname": "cs-n0151",
+              "slot": 7
+            },
+            {
+              "hostname": "cs-n0152",
+              "slot": 8
+            },
+            {
+              "hostname": "cs-n0153",
+              "slot": 9
+            },
+            {
+              "hostname": "cs-n0154",
+              "slot": 10
+            },
+            {
+              "hostname": "cs-n0155",
+              "slot": 11
+            },
+            {
+              "hostname": "cs-n0156",
+              "slot": 12
+            },
+            {
+              "hostname": "cs-n0157",
+              "slot": 13
+            },
+            {
+              "hostname": "cs-n0158",
+              "slot": 14
+            },
+            {
+              "hostname": "cs-n0159",
+              "slot": 15
+            }
+          ]
+        },
+        {
+          "id": "RACK-x1000sw10",
+          "x_offset": 40,
+          "z_offset": 0,
+          "nodes": [
+            {
+              "hostname": "cs-n0160",
+              "slot": 0
+            },
+            {
+              "hostname": "cs-n0161",
+              "slot": 1
+            },
+            {
+              "hostname": "cs-n0162",
+              "slot": 2
+            },
+            {
+              "hostname": "cs-n0163",
+              "slot": 3
+            },
+            {
+              "hostname": "cs-n0164",
+              "slot": 4
+            },
+            {
+              "hostname": "cs-n0165",
+              "slot": 5
+            },
+            {
+              "hostname": "cs-n0166",
+              "slot": 6
+            },
+            {
+              "hostname": "cs-n0167",
+              "slot": 7
+            },
+            {
+              "hostname": "cs-n0168",
+              "slot": 8
+            },
+            {
+              "hostname": "cs-n0169",
+              "slot": 9
+            },
+            {
+              "hostname": "cs-n0170",
+              "slot": 10
+            },
+            {
+              "hostname": "cs-n0171",
+              "slot": 11
+            },
+            {
+              "hostname": "cs-n0172",
+              "slot": 12
+            },
+            {
+              "hostname": "cs-n0173",
+              "slot": 13
+            },
+            {
+              "hostname": "cs-n0174",
+              "slot": 14
+            },
+            {
+              "hostname": "cs-n0175",
+              "slot": 15
+            }
+          ]
+        },
+        {
+          "id": "RACK-x1000sw11",
+          "x_offset": 60,
+          "z_offset": 0,
+          "nodes": [
+            {
+              "hostname": "cs-n0176",
+              "slot": 0
+            },
+            {
+              "hostname": "cs-n0177",
+              "slot": 1
+            },
+            {
+              "hostname": "cs-n0178",
+              "slot": 2
+            },
+            {
+              "hostname": "cs-n0179",
+              "slot": 3
+            },
+            {
+              "hostname": "cs-n0180",
+              "slot": 4
+            },
+            {
+              "hostname": "cs-n0181",
+              "slot": 5
+            },
+            {
+              "hostname": "cs-n0182",
+              "slot": 6
+            },
+            {
+              "hostname": "cs-n0183",
+              "slot": 7
+            },
+            {
+              "hostname": "cs-n0184",
+              "slot": 8
+            },
+            {
+              "hostname": "cs-n0185",
+              "slot": 9
+            },
+            {
+              "hostname": "cs-n0186",
+              "slot": 10
+            },
+            {
+              "hostname": "cs-n0187",
+              "slot": 11
+            },
+            {
+              "hostname": "cs-n0188",
+              "slot": 12
+            },
+            {
+              "hostname": "cs-n0189",
+              "slot": 13
+            },
+            {
+              "hostname": "cs-n0190",
+              "slot": 14
+            },
+            {
+              "hostname": "cs-n0191",
+              "slot": 15
+            }
+          ]
+        },
+        {
+          "id": "RACK-x1000sw12",
+          "x_offset": 80,
+          "z_offset": 0,
+          "nodes": [
+            {
+              "hostname": "cs-n0192",
+              "slot": 0
+            },
+            {
+              "hostname": "cs-n0193",
+              "slot": 1
+            },
+            {
+              "hostname": "cs-n0194",
+              "slot": 2
+            },
+            {
+              "hostname": "cs-n0195",
+              "slot": 3
+            },
+            {
+              "hostname": "cs-n0196",
+              "slot": 4
+            },
+            {
+              "hostname": "cs-n0197",
+              "slot": 5
+            },
+            {
+              "hostname": "cs-n0198",
+              "slot": 6
+            },
+            {
+              "hostname": "cs-n0199",
+              "slot": 7
+            },
+            {
+              "hostname": "cs-n0200",
+              "slot": 8
+            },
+            {
+              "hostname": "cs-n0201",
+              "slot": 9
+            },
+            {
+              "hostname": "cs-n0202",
+              "slot": 10
+            },
+            {
+              "hostname": "cs-n0203",
+              "slot": 11
+            },
+            {
+              "hostname": "cs-n0204",
+              "slot": 12
+            },
+            {
+              "hostname": "cs-n0205",
+              "slot": 13
+            },
+            {
+              "hostname": "cs-n0206",
+              "slot": 14
+            },
+            {
+              "hostname": "cs-n0207",
+              "slot": 15
+            }
+          ]
+        },
+        {
+          "id": "RACK-x1000sw13",
+          "x_offset": 100,
+          "z_offset": 0,
+          "nodes": [
+            {
+              "hostname": "cs-n0208",
+              "slot": 0
+            },
+            {
+              "hostname": "cs-n0209",
+              "slot": 1
+            },
+            {
+              "hostname": "cs-n0210",
+              "slot": 2
+            },
+            {
+              "hostname": "cs-n0211",
+              "slot": 3
+            },
+            {
+              "hostname": "cs-n0212",
+              "slot": 4
+            },
+            {
+              "hostname": "cs-n0213",
+              "slot": 5
+            },
+            {
+              "hostname": "cs-n0214",
+              "slot": 6
+            },
+            {
+              "hostname": "cs-n0215",
+              "slot": 7
+            },
+            {
+              "hostname": "cs-n0216",
+              "slot": 8
+            },
+            {
+              "hostname": "cs-n0217",
+              "slot": 9
+            },
+            {
+              "hostname": "cs-n0218",
+              "slot": 10
+            },
+            {
+              "hostname": "cs-n0219",
+              "slot": 11
+            },
+            {
+              "hostname": "cs-n0220",
+              "slot": 12
+            },
+            {
+              "hostname": "cs-n0221",
+              "slot": 13
+            },
+            {
+              "hostname": "cs-n0222",
+              "slot": 14
+            },
+            {
+              "hostname": "cs-n0223",
+              "slot": 15
+            }
+          ]
+        },
+        {
+          "id": "RACK-x1000sw14",
+          "x_offset": 120,
+          "z_offset": 0,
+          "nodes": [
+            {
+              "hostname": "cs-n0224",
+              "slot": 0
+            },
+            {
+              "hostname": "cs-n0225",
+              "slot": 1
+            },
+            {
+              "hostname": "cs-n0226",
+              "slot": 2
+            },
+            {
+              "hostname": "cs-n0227",
+              "slot": 3
+            },
+            {
+              "hostname": "cs-n0228",
+              "slot": 4
+            },
+            {
+              "hostname": "cs-n0229",
+              "slot": 5
+            },
+            {
+              "hostname": "cs-n0230",
+              "slot": 6
+            },
+            {
+              "hostname": "cs-n0231",
+              "slot": 7
+            },
+            {
+              "hostname": "cs-n0232",
+              "slot": 8
+            },
+            {
+              "hostname": "cs-n0233",
+              "slot": 9
+            },
+            {
+              "hostname": "cs-n0234",
+              "slot": 10
+            },
+            {
+              "hostname": "cs-n0235",
+              "slot": 11
+            },
+            {
+              "hostname": "cs-n0236",
+              "slot": 12
+            },
+            {
+              "hostname": "cs-n0237",
+              "slot": 13
+            },
+            {
+              "hostname": "cs-n0238",
+              "slot": 14
+            },
+            {
+              "hostname": "cs-n0239",
+              "slot": 15
+            }
+          ]
+        },
+        {
+          "id": "RACK-x1000sw15",
+          "x_offset": 140,
+          "z_offset": 0,
+          "nodes": [
+            {
+              "hostname": "cs-n0240",
+              "slot": 0
+            },
+            {
+              "hostname": "cs-n0241",
+              "slot": 1
+            },
+            {
+              "hostname": "cs-n0242",
+              "slot": 2
+            },
+            {
+              "hostname": "cs-n0243",
+              "slot": 3
+            },
+            {
+              "hostname": "cs-n0244",
+              "slot": 4
+            },
+            {
+              "hostname": "cs-n0245",
+              "slot": 5
+            },
+            {
+              "hostname": "cs-n0246",
+              "slot": 6
+            },
+            {
+              "hostname": "cs-n0247",
+              "slot": 7
+            },
+            {
+              "hostname": "cs-n0248",
+              "slot": 8
+            },
+            {
+              "hostname": "cs-n0249",
+              "slot": 9
+            },
+            {
+              "hostname": "cs-n0250",
+              "slot": 10
+            },
+            {
+              "hostname": "cs-n0251",
+              "slot": 11
+            },
+            {
+              "hostname": "cs-n0252",
+              "slot": 12
+            },
+            {
+              "hostname": "cs-n0253",
+              "slot": 13
+            },
+            {
+              "hostname": "cs-n0254",
+              "slot": 14
+            },
+            {
+              "hostname": "cs-n0255",
+              "slot": 15
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
