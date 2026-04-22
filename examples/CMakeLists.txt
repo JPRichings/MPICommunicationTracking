@@ -23,14 +23,14 @@ if(CMAKE_Fortran_COMPILER)
     find_package(MPI COMPONENTS Fortran)
     
     if(MPI_Fortran_FOUND)
-        add_executable(fortran_mpi_hello fortran_mpi_hello.f90)
-        target_link_libraries(fortran_mpi_hello PRIVATE MPI::MPI_Fortran mpi_comm_tracker)
-        message(STATUS "Fortran and MPI_Fortran found: Building fortran_mpi_hello")
+        add_executable(fortran_mpi_pingpong fortran_mpi_pingpong.f90)
+        target_link_libraries(fortran_mpi_pingpong PRIVATE MPI::MPI_Fortran mpi_comm_tracker)
+        message(STATUS "Fortran and MPI_Fortran found: Building fortran_mpi_pingpong")
     else()
         message(WARNING "Fortran compiler found, but MPI Fortran libraries are missing. Skipping Fortran example.")
     endif()
 
 else()
     # No compiler found, fail gracefully without crashing CMake
-    message(WARNING "No Fortran compiler found on this system. Skipping fortran_mpi_hello.")
+    message(WARNING "No Fortran compiler found on this system. Skipping fortran_mpi_pingpong.")
 endif()
