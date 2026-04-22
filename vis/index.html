@@ -18,7 +18,6 @@
         <aside id="sidebar">
             <div class="sidebar-header">
                 <h2>MPI Profiler</h2>
-                <p>Hardware Mapping</p>
             </div>
             <div class="control-group">
                 <label for="profileLoader" class="btn-load">📂 Load .json Profile</label>
@@ -34,9 +33,10 @@
                 </div>
             </div>
             <div class="stats-panel" style="margin-top: 20px; padding: 15px; background: #161b22; border-radius: 6px;">
-                <h3 style="font-size: 0.9rem; color: #8b949e; text-transform: uppercase; margin-bottom: 10px;">Message Spectrogram</h3>
-                <div id="spectrogramContainer" style="width: 100%; overflow-x: auto;">
-                </div>
+                <h3 style="font-size: 0.9rem; color: #8b949e; text-transform: uppercase; margin-bottom: 5px;">Overall Message Statistics</h3>
+                <div id="spectrogramContainer" style="width: 100%; overflow-x: auto; margin-bottom: 15px;"></div>
+                <h3 style="font-size: 0.9rem; color: #2ea043; text-transform: uppercase; margin-bottom: 5px;">Active Message Statistics</h3>
+                <div id="dynamicSpectrogramContainer" style="width: 100%; overflow-x: auto;"></div>
             </div>
         </aside>
 

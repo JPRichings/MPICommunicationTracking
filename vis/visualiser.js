@@ -15,6 +15,9 @@ let linesGroup;
 
 let timeMultiplier = 1;
 
+let dynamicCells = {}; // Fast lookup for the HTML table cells
+let lastDynUpdate = 0; // Throttle timer for the play loop
+
 document.addEventListener("DOMContentLoaded", () => {
     initThreeJS();
     document.getElementById("profileLoader").addEventListener("change", handleFileUpload);
@@ -116,9 +119,12 @@ function initDashboard() {
     document.getElementById("btn-play").disabled = false;
 
     buildHardwareTopology(topology);
-    seekToTime(0);
 
     renderSpectrogram();
+    initDynamicSpectrogram();
+
+    seekToTime(0);
+
 }
 
 // Add a hostname map to the top of your file with the other globals
@@ -205,6 +211,122 @@ function buildHardwareTopology(nodesData) {
     controls.update();
 }
 
+function initDynamicSpectrogram() {
+    const stats = parsedData.statistics;
+    if (!stats) return;
+
+    const container = document.getElementById('dynamicSpectrogramContainer');
+    container.innerHTML = ''; 
+    dynamicCells = {}; 
+
+    const calls = Object.keys(stats);
+    if (calls.length === 0) return;
+    const bins = Object.keys(stats[calls[0]]);
+
+    const table = document.createElement('table');
+    table.style.borderCollapse = 'collapse';
+    table.style.width = '100%';
+    table.style.color = '#c9d1d9';
+    table.style.fontSize = '0.75rem';
+    table.style.fontFamily = "'Fira Code', monospace";
+
+    // Header Row
+    const thead = document.createElement('tr');
+    thead.appendChild(document.createElement('th')); 
+    bins.forEach(b => {
+        const th = document.createElement('th');
+        th.textContent = b.replace(' - ', '\n');
+        th.style.padding = '4px 2px';
+        th.style.textAlign = 'center';
+        th.style.color = '#8b949e';
+        th.style.fontWeight = 'normal';
+        th.style.whiteSpace = 'pre-wrap';
+        thead.appendChild(th);
+    });
+    table.appendChild(thead);
+
+    // Data Rows
+    calls.forEach(call => {
+        const tr = document.createElement('tr');
+        dynamicCells[call] = {}; // Initialize fast lookup for this row
+        
+        const tdLabel = document.createElement('td');
+        tdLabel.textContent = call.replace('MPI_', ''); 
+        tdLabel.style.padding = '4px 8px 4px 0';
+        tdLabel.style.textAlign = 'right';
+        tdLabel.style.color = '#8b949e';
+        tdLabel.style.fontWeight = '600';
+        tr.appendChild(tdLabel);
+
+        bins.forEach(bin => {
+            const td = document.createElement('td');
+            td.style.backgroundColor = `rgba(46, 160, 67, 0)`; // Start empty (Green scale)
+            td.style.border = '1px solid #30363d';
+            td.style.height = '24px';
+            
+            dynamicCells[call][bin] = td; // Save reference for fast updates
+            tr.appendChild(td);
+        });
+        table.appendChild(tr);
+    });
+    container.appendChild(table);
+}
+
+function updateDynamicSpectrogram(currentVisualTime) {
+    if (!parsedData || !dynamicCells) return;
+
+    const stats = parsedData.statistics;
+    const calls = Object.keys(stats);
+    if (calls.length === 0) return;
+    const binsTemplate = Object.keys(stats[calls[0]]);
+
+    // Initialize empty counts for the current slice of time
+    let currentCounts = {};
+    calls.forEach(c => {
+        currentCounts[c] = {};
+        binsTemplate.forEach(b => currentCounts[c][b] = 0);
+    });
+
+    // Tally all messages up to the current time slider position
+    for (let i = 0; i < parsedData.timeline.length; i++) {
+        const event = parsedData.timeline[i];
+        if (event.time > currentVisualTime) break; // Timeline is chronological, so we stop early
+        
+        const call = event.call;
+        if (currentCounts[call] !== undefined) {
+            const bytes = event.bytes || 0;
+            if (bytes < 128) currentCounts[call]["< 128B"]++;
+            else if (bytes < 1024) currentCounts[call]["128B - 1KB"]++;
+            else if (bytes < 65536) currentCounts[call]["1KB - 64KB"]++;
+            else if (bytes < 1048576) currentCounts[call]["64KB - 1MB"]++;
+            else if (bytes < 16777216) currentCounts[call]["1MB - 16MB"]++;
+            else currentCounts[call]["> 16MB"]++;
+        }
+    }
+
+    // Find the global max from the STATIC stats so the colors fill up proportionally
+    let globalMax = 0;
+    calls.forEach(c => binsTemplate.forEach(b => {
+        if (stats[c][b] > globalMax) globalMax = stats[c][b];
+    }));
+
+    // Update the background colors of our pre-built HTML table
+    calls.forEach(call => {
+        binsTemplate.forEach(bin => {
+            const count = currentCounts[call][bin];
+            const td = dynamicCells[call][bin];
+
+            let intensity = 0;
+            if (count > 0) {
+                intensity = Math.max(0.15, Math.log10(count + 1) / Math.log10(globalMax + 1));
+            }
+            // Use GitHub Success Green to distinguish from the blue static map
+            td.style.backgroundColor = `rgba(46, 160, 67, ${intensity})`; 
+            td.title = `${call} | ${bin}:\n${count.toLocaleString()} messages (Accumulated)`; 
+        });
+    });
+}
+
 function renderSpectrogram() {
     const stats = parsedData.statistics;
     if (!stats) return;
@@ -215,7 +337,7 @@ function renderSpectrogram() {
     const calls = Object.keys(stats);
     if (calls.length === 0) return;
 
-    const bins = Object.keys(stats[calls[0]]); // e.g., ["< 128B", "128B < 1KB", "1KB - 64KB", ...]
+    const bins = Object.keys(stats[calls[0]]); // e.g., ["< 128B", "128B -  1KB", "1KB - 64KB", ...]
 
     // Find the global maximum to scale our colors properly
     let maxCount = 0;
@@ -377,6 +499,7 @@ function seekToTime(time) {
     document.getElementById("timeSlider").value = currentTime;
     document.getElementById("currentTimeLabel").textContent = currentTime.toFixed(3);
     renderActiveCommunications();
+    updateDynamicSpectrogram(currentTime);
 }
 
 function clearLines() {
@@ -414,6 +537,11 @@ function playLoop(timestamp) {
     
     // Calculate the next time based on our smart multiplier
     let nextTime = currentTime + (deltaTime * timeMultiplier * speed);
+
+    if (timestamp - lastDynUpdate > 100) {
+        updateDynamicSpectrogram(nextTime);
+        lastDynUpdate = timestamp;
+    }
 
     if (nextTime >= maxTime) {
         seekToTime(maxTime);
