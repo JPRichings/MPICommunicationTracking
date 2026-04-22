@@ -6,3 +6,4 @@ project(MPICommunicationTracking VERSION 1.0 LANGUAGES C)
 find_package(MPI REQUIRED)
 
 add_subdirectory(src)
+add_subdirectory(examples)

@@ -61,8 +61,8 @@ int MPI_Init(int *argc, char ***argv){
 
   MPI_Comm_rank(MPI_COMM_WORLD,&my_rank);
   MPI_Comm_size(MPI_COMM_WORLD,&my_size);
-  
-  MPI_Barrier(MPI_COMM_WORLD);
+
+  PMPI_Barrier(MPI_COMM_WORLD);  
 
   my_time = MPI_Wtime();
   
@@ -154,8 +154,8 @@ int MPI_Finalize(){
   double min_time, max_time, offset_time;
 
   // Get the rank and size of the node communicator this process is involved in.
-  MPI_Comm_size(MPI_COMM_WORLD, &temp_size);
-  MPI_Comm_rank(MPI_COMM_WORLD, &temp_rank);
+  PMPI_Comm_size(MPI_COMM_WORLD, &temp_size);
+  PMPI_Comm_rank(MPI_COMM_WORLD, &temp_rank);
   world_comm.size = temp_size;
   world_comm.rank = temp_rank;  
   world_comm.comm = MPI_COMM_WORLD;
@@ -164,20 +164,20 @@ int MPI_Finalize(){
   node_key = mpi_high_water_get_key();
   
   // Use the node key to split the MPI_COMM_WORLD communicator
-  MPI_Comm_split(world_comm.comm, node_key, 0, &temp_comm);
+  PMPI_Comm_split(world_comm.comm, node_key, 0, &temp_comm);
   
-  MPI_Comm_size(temp_comm, &temp_size);
-  MPI_Comm_rank(temp_comm, &temp_rank);
+  PMPI_Comm_size(temp_comm, &temp_size);
+  PMPI_Comm_rank(temp_comm, &temp_rank);
   
   node_comm.comm = temp_comm;
   node_comm.rank = temp_rank;
   node_comm.size = temp_size;
   
   // Now create a communicator that goes across nodes. 
-  MPI_Comm_split(world_comm.comm, node_comm.rank, 0, &temp_comm);
+  PMPI_Comm_split(world_comm.comm, node_comm.rank, 0, &temp_comm);
   
-  MPI_Comm_size(temp_comm, &temp_size);
-  MPI_Comm_rank(temp_comm, &temp_rank);
+  PMPI_Comm_size(temp_comm, &temp_size);
+  PMPI_Comm_rank(temp_comm, &temp_rank);
   
   root_comm.comm = temp_comm;
   root_comm.rank = temp_rank;
@@ -204,15 +204,15 @@ int MPI_Finalize(){
       }
     }
 
-    MPI_Reduce(&memory_used, &node_max, 1, MPI_INT, MPI_MAX, 0, node_comm.comm);
-    MPI_Reduce(&memory_used, &node_min, 1, MPI_INT, MPI_MIN, 0, node_comm.comm);
-    MPI_Reduce(&memory_used, &node_total, 1, MPI_INT, MPI_SUM, 0, node_comm.comm);
+    PMPI_Reduce(&memory_used, &node_max, 1, MPI_INT, MPI_MAX, 0, node_comm.comm);
+    PMPI_Reduce(&memory_used, &node_min, 1, MPI_INT, MPI_MIN, 0, node_comm.comm);
+    PMPI_Reduce(&memory_used, &node_total, 1, MPI_INT, MPI_SUM, 0, node_comm.comm);
     if(node_comm.rank == 0){
-      MPI_Reduce(&node_max, &root_indivi_max, 1, MPI_INT, MPI_MAX, 0, root_comm.comm);
-      MPI_Reduce(&node_min, &root_indivi_min, 1, MPI_INT, MPI_MIN, 0, root_comm.comm);
-      MPI_Reduce(&node_total, &root_node_max, 1, MPI_INT, MPI_MAX, 0, root_comm.comm);
-      MPI_Reduce(&node_total, &root_node_min, 1, MPI_INT, MPI_MIN, 0, root_comm.comm);      
-      MPI_Reduce(&node_total, &root_node_av, 1, MPI_INT, MPI_SUM, 0, root_comm.comm);
+      PMPI_Reduce(&node_max, &root_indivi_max, 1, MPI_INT, MPI_MAX, 0, root_comm.comm);
+      PMPI_Reduce(&node_min, &root_indivi_min, 1, MPI_INT, MPI_MIN, 0, root_comm.comm);
+      PMPI_Reduce(&node_total, &root_node_max, 1, MPI_INT, MPI_MAX, 0, root_comm.comm);
+      PMPI_Reduce(&node_total, &root_node_min, 1, MPI_INT, MPI_MIN, 0, root_comm.comm);      
+      PMPI_Reduce(&node_total, &root_node_av, 1, MPI_INT, MPI_SUM, 0, root_comm.comm);
       root_node_av = root_node_av/root_comm.size;
     }
     if(world_comm.rank == 0){
@@ -224,8 +224,8 @@ int MPI_Finalize(){
     printf("%s:%d problem opening /proc/pid/status file\n",hostname,pid);
   }
 
-  MPI_Allreduce(&my_time, &max_time, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
-  MPI_Allreduce(&my_time, &min_time, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
+  PMPI_Allreduce(&my_time, &max_time, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+  PMPI_Allreduce(&my_time, &min_time, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
 
   offset_time = my_time - min_time;
   
@@ -246,8 +246,8 @@ int MPI_Finalize(){
   free(number_of_small_messages);
   free(number_of_large_messages);
  
-  MPI_Comm_free(&(node_comm.comm));
-  MPI_Comm_free(&(root_comm.comm));
+  PMPI_Comm_free(&(node_comm.comm));
+  PMPI_Comm_free(&(root_comm.comm));
  
   return PMPI_Finalize();
 }

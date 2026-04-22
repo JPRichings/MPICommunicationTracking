@@ -1,0 +1,154 @@
+{
+  "cabinets": [
+    {
+      "id": "CAB-01",
+      "x": 0,
+      "z": 0,
+      "racks": [
+        {
+          "id": "RACK-01-01",
+          "x_offset": 0,
+          "z_offset": 0,
+          "nodes": [
+            {
+              "hostname": "nextgenio-cn01",
+              "slot": 0
+            },
+            {
+              "hostname": "nextgenio-cn02",
+              "slot": 1
+            },
+            {
+              "hostname": "nextgenio-cn03",
+              "slot": 2
+            },
+            {
+              "hostname": "nextgenio-cn04",
+              "slot": 3
+            },
+            {
+              "hostname": "nextgenio-cn05",
+              "slot": 4
+            },
+            {
+              "hostname": "nextgenio-cn06",
+              "slot": 5
+            },
+            {
+              "hostname": "nextgenio-cn07",
+              "slot": 6
+            },
+            {
+              "hostname": "nextgenio-cn08",
+              "slot": 7
+            },
+            {
+              "hostname": "nextgenio-cn09",
+              "slot": 8
+            },
+            {
+              "hostname": "nextgenio-cn10",
+              "slot": 9
+            },
+            {
+              "hostname": "nextgenio-cn11",
+              "slot": 10
+            },
+            {
+              "hostname": "nextgenio-cn12",
+              "slot": 11
+            },
+            {
+              "hostname": "nextgenio-cn13",
+              "slot": 12
+            },
+            {
+              "hostname": "nextgenio-cn14",
+              "slot": 13
+            },
+            {
+              "hostname": "nextgenio-cn15",
+              "slot": 14
+            },
+            {
+              "hostname": "nextgenio-cn16",
+              "slot": 15
+            },
+            {
+              "hostname": "nextgenio-cn17",
+              "slot": 16
+            },
+            {
+              "hostname": "nextgenio-cn18",
+              "slot": 17
+            },
+            {
+              "hostname": "nextgenio-cn19",
+              "slot": 18
+            },
+            {
+              "hostname": "nextgenio-cn20",
+              "slot": 19
+            },
+            {
+              "hostname": "nextgenio-cn21",
+              "slot": 20
+            },
+            {
+              "hostname": "nextgenio-cn22",
+              "slot": 21
+            },
+            {
+              "hostname": "nextgenio-cn23",
+              "slot": 22
+            },
+            {
+              "hostname": "nextgenio-cn24",
+              "slot": 23
+            },
+            {
+              "hostname": "nextgenio-cn25",
+              "slot": 24
+            },
+            {
+              "hostname": "nextgenio-cn26",
+              "slot": 25
+            },
+            {
+              "hostname": "nextgenio-cn27",
+              "slot": 26
+            },
+            {
+              "hostname": "nextgenio-cn28",
+              "slot": 27
+            },
+            {
+              "hostname": "nextgenio-cn29",
+              "slot": 28
+            },
+            {
+              "hostname": "nextgenio-cn30",
+              "slot": 29
+            },
+            {
+              "hostname": "nextgenio-cn31",
+              "slot": 30
+            },
+            {
+              "hostname": "nextgenio-cn32",
+              "slot": 31
+            },
+            {
+              "hostname": "nextgenio-cn33",
+              "slot": 32
+            },
+            {
+              "hostname": "nextgenio-cn34",
+              "slot": 33
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

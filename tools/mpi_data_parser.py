@@ -39,7 +39,7 @@ def load_hardware_map(filepath):
     return lookup
 
 def parse_mpic_file(mpic_filepath, hw_filepath=None):
-    if not os.path.exists(mpi_filepath):
+    if not os.path.exists(mpic_filepath):
         print(f"Error: File '{mpic_filepath}' not found.")
         sys.exit(1)
 
@@ -166,7 +166,7 @@ def parse_mpic_file(mpic_filepath, hw_filepath=None):
     with open(output_filename, 'w') as out_f:
         json.dump(data, out_f, indent=2)
     
-    print(f"Success! Parsed {len(data['timeline'])} communication events.")
+    print(f"Parsed {len(data['timeline'])} communication events.")
     print(f"Data saved to {output_filename}")
 
 if __name__ == "__main__":
