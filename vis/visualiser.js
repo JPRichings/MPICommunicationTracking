@@ -114,16 +114,29 @@ function buildHardwareTopology(nodesData) {
     const nodeGeometry = new THREE.BoxGeometry(8, 8, 8);
     const nodeMaterial = new THREE.MeshPhongMaterial({ color: 0x8b949e, emissive: 0x222222 });
 
+    let maxY = 0; // We will use this to find the highest node
+
     nodesData.forEach(d => {
         const mesh = new THREE.Mesh(nodeGeometry, nodeMaterial);
         mesh.position.set(d.x, d.y, d.z);
         mesh.name = "mpiNode";
         
         scene.add(mesh);
-        
-        // Save to map for fast line drawing later
         nodeMap.set(d.rank, { x: d.x, y: d.y, z: d.z, mesh: mesh });
+
+        // Track the highest Y coordinate
+        if (d.y > maxY) maxY = d.y; 
     });
+
+    // Find the middle height of your rack
+    const centerY = maxY / 2; 
+    
+    // Move the camera up to the middle, and pull it back based on how tall the rack is
+    camera.position.set(0, centerY, maxY > 0 ? maxY : 150); 
+    
+    // Tell the orbit controls to look at the center instead of the floor
+    controls.target.set(0, centerY, 0);
+    controls.update();
 }
 
 function handleManualSeek(event) {
