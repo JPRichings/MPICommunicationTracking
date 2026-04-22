@@ -48,10 +48,104 @@ void mpi_finalize_(int *ierr){
 
 // Function to intercept Fortran MPI call to MPI_INIT. Passes through to the
 // C version of MPI_Init following this routine.
-void mpi_init_(int *ierr){
-  *ierr = MPI_Init(NULL,NULL);
+void mpi_init_(int *ierr) {
+    int argc = 0; char **argv = NULL;
+    *ierr = MPI_Init(&argc, &argv);
 }
 
+// Fortran 2008 (f08) Bindings
+void mpi_finalize_f08_(int *ierr) {
+    *ierr = MPI_Finalize();
+}
+
+// Fortran 2008 (f08) Bindings
+void mpi_init_f08_(int *ierr) {
+    int argc = 0; char **argv = NULL;
+    *ierr = MPI_Init(&argc, &argv);
+}
+
+// Catch uppercase function names produced by compilers just in case 
+void MPI_INIT(int *ierr) { mpi_init_(ierr); }
+void MPI_FINALIZE(int *ierr) { mpi_finalize_(ierr); }
+
+
+int MPI_Init_thread(int *argc, char ***argv, int required, int *provided) {
+
+    int err;
+
+    err = PMPI_Init_thread(argc, argv, required, provided);
+
+    PMPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
+    PMPI_Comm_size(MPI_COMM_WORLD, &my_size);
+    PMPI_Barrier(MPI_COMM_WORLD);
+    my_time = PMPI_Wtime();
+
+  my_time = MPI_Wtime();
+
+  get_program_name();
+
+  get_process_id();
+
+  gethostname(hostname, STRING_LENGTH);
+
+  p2p_small_head = (p2p_small_node_t *) malloc(sizeof(p2p_small_node_t));
+  if(p2p_small_head == NULL){
+    printf("Error creating the data structure for storing message data\n");
+    return 1;
+  }
+  p2p_small_head->time = 0.0;
+  p2p_small_head->id = -1;
+  p2p_small_head->message_type = -1;
+  p2p_small_head->sender = -1;
+  p2p_small_head->receiver = -1;
+  p2p_small_head->count = -1;
+  p2p_small_head->bytes = -1;
+  p2p_small_head->next = NULL;
+
+  p2p_small_current = p2p_small_head;
+  p2p_small_current_length = 0;
+  p2p_small_total_length = 0;
+
+  p2p_large_head = (p2p_large_node_t *) malloc(sizeof(p2p_large_node_t));
+  if(p2p_large_head == NULL){
+    printf("Error creating the data structure for storing message data\n");
+    return 1;
+  }
+
+  p2p_large_head->time = 0.0;
+  p2p_large_head->id = -1;
+  p2p_large_head->message_type = -1;
+  p2p_large_head->sender1 = -1;
+  p2p_large_head->receiver1 = -1;
+  p2p_large_head->count1 = -1;
+  p2p_large_head->bytes1 = -1;
+  p2p_large_head->sender2 = -1;
+  p2p_large_head->receiver2 = -1;
+  p2p_large_head->count2 = -1;
+  p2p_large_head->bytes2 = -1;
+  p2p_large_head->next = NULL;
+
+  p2p_large_current = p2p_large_head;
+  p2p_large_current_length = 0;
+  p2p_large_total_length = 0;
+
+  current_id = 0;
+
+  open_data_files();
+
+  if(my_rank == 0){
+    open_global_file();
+  }
+
+  gather_process_information();
+
+  if(my_rank == 0){
+    write_global_information();
+  }
+
+  return err;
+
+}
 
 int MPI_Init(int *argc, char ***argv){
 
