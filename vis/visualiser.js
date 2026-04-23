@@ -18,12 +18,22 @@ let timeMultiplier = 1;
 let dynamicCells = {}; // Fast lookup for the HTML table cells
 let lastDynUpdate = 0; // Throttle timer for the play loop
 
+let uploadedFilePointer = null;
+let currentLoadedChunkIndex = -1; // Keep track of what chunk is currently in RAM
+let headerLengthOffset = 0;       // Math offset for finding chunks
+
 document.addEventListener("DOMContentLoaded", () => {
     initThreeJS();
     document.getElementById("profileLoader").addEventListener("change", handleFileUpload);
     document.getElementById("timeSlider").addEventListener("input", handleManualSeek);
     document.getElementById("btn-play").addEventListener("click", togglePlayback);
 });
+
+async function decompressBlob(blob) {
+    const ds = new DecompressionStream('deflate'); // zlib uses deflate
+    const decompressedStream = blob.stream().pipeThrough(ds);
+    return await new Response(decompressedStream).text();
+}
 
 function initThreeJS() {
     const container = document.getElementById('visCanvas');
@@ -72,30 +82,30 @@ function initThreeJS() {
     });
 }
 
+
 async function handleFileUpload(event) {
-    const file = event.target.files[0];
-    if (!file) return;
+    uploadedFilePointer = event.target.files[0];
+    if (!uploadedFilePointer) return;
 
     try {
-        let textData;
+        // Read the first 4 bytes to find out how big the header is
+        const sizeBuf = await uploadedFilePointer.slice(0, 4).arrayBuffer();
+        const headerSize = new DataView(sizeBuf).getUint32(0, true); // little-endian
         
-        // If it's i compressed format unzip it natively in the browser
-        if (file.name.endsWith('.gz')) {
-            const ds = new DecompressionStream('gzip');
-            const decompressedStream = file.stream().pipeThrough(ds);
-            textData = await new Response(decompressedStream).text();
-        } 
-        // Fallback for older uncompressed .json files
-        else {
-            textData = await file.text();
-        }
+        headerLengthOffset = 4 + headerSize; // Where the chunks start in the file
 
-        parsedData = JSON.parse(textData);
+        // Slice out the header, decompress it, and parse it
+        const headerBlob = uploadedFilePointer.slice(4, headerLengthOffset);
+        const headerText = await decompressBlob(headerBlob);
+        
+        // parsedData now contains everything except the timeline
+        parsedData = JSON.parse(headerText);
+        parsedData.timeline = []; // Initialize empty timeline
+        
         initDashboard();
         
     } catch (error) {
-        console.error("Error parsing file:", error);
-        alert("Failed to load or parse the profile. Check the console for details.");
+        console.error("Failed to unpack the .mpix container:", error);
     }
 }
 
@@ -505,12 +515,106 @@ function handleManualSeek(event) {
     seekToTime(parseFloat(event.target.value));
 }
 
-function seekToTime(time) {
+async function seekToTime(time) {
     currentTime = time;
     document.getElementById("timeSlider").value = currentTime;
     document.getElementById("currentTimeLabel").textContent = currentTime.toFixed(3);
+    
+    // Check if we need to load a new chunk from disk
+    await ensureChunkLoadedForTime(currentTime);
+    
     renderActiveCommunications();
     updateDynamicSpectrogram(currentTime);
+}
+
+async function ensureChunkLoadedForTime(time) {
+    const chunks = parsedData.chunks;
+    if (!chunks) return;
+
+    // Find which chunk this timestamp belongs to
+    let targetIndex = chunks.findIndex(c => time >= c.t_start && time <= c.t_end);
+    
+    // Fallback: If time is before the first chunk or after the last
+    if (targetIndex === -1 && time < chunks[0].t_start) targetIndex = 0;
+    if (targetIndex === -1 && time > chunks[chunks.length - 1].t_end) targetIndex = chunks.length - 1;
+
+    // If we already have this chunk in RAM, do nothing!
+    if (targetIndex === currentLoadedChunkIndex) return;
+
+    // We need a new chunk! Pause playback while we read from the hard drive
+    const wasPlaying = isPlaying;
+    if (wasPlaying) pausePlayback();
+
+    const chunk = chunks[targetIndex];
+    
+    // Calculate exact absolute byte position in the file
+    const absoluteStart = headerLengthOffset + chunk.offset;
+    const absoluteEnd = absoluteStart + chunk.size;
+
+    // Slice -> Unzip -> Parse
+    const chunkBlob = uploadedFilePointer.slice(absoluteStart, absoluteEnd);
+    const chunkText = await decompressBlob(chunkBlob);
+    
+    // Swap the old 500k array out of RAM, let the Garbage Collector eat it, and load the new one
+    parsedData.timeline = JSON.parse(chunkText);
+    currentLoadedChunkIndex = targetIndex;
+
+    console.log(`Loaded Chunk ${targetIndex + 1}/${chunks.length} into memory.`);
+
+    if (wasPlaying) togglePlayback();
+}
+
+async function ensureChunkLoadedForTime(time) {
+    const chunks = parsedData.chunks;
+    if (!chunks) return;
+
+    // Find which chunk this timestamp belongs to
+    let targetIndex = chunks.findIndex(c => time >= c.t_start && time <= c.t_end);
+    
+    // Fallback: If time is before the first chunk or after the last
+    if (targetIndex === -1 && time < chunks[0].t_start) targetIndex = 0;
+    if (targetIndex === -1 && time > chunks[chunks.length - 1].t_end) targetIndex = chunks.length - 1;
+
+    // If we already have this chunk in RAM, do nothing!
+    if (targetIndex === currentLoadedChunkIndex) return;
+
+    // We need a new chunk! Pause playback.
+    const wasPlaying = isPlaying;
+    if (wasPlaying) pausePlayback();
+
+    // Show a loading overlay
+    const overlay = document.getElementById('loadingOverlay');
+    const loadingText = document.getElementById('loadingText');
+    overlay.style.display = 'block';
+    loadingText.textContent = `Unpacking Chunk ${targetIndex + 1} of ${chunks.length}...`;
+
+    // Give the browser 1 frame to draw the UI before we lock the CPU
+    await new Promise(resolve => requestAnimationFrame(resolve));
+
+    try {
+        const chunk = chunks[targetIndex];
+        
+        // Calculate exact absolute byte position in the file
+        const absoluteStart = headerLengthOffset + chunk.offset;
+        const absoluteEnd = absoluteStart + chunk.size;
+
+        // Slice -> Unzip -> Parse
+        const chunkBlob = uploadedFilePointer.slice(absoluteStart, absoluteEnd);
+        const chunkText = await decompressBlob(chunkBlob);
+        
+        // Swap the arrays
+        parsedData.timeline = JSON.parse(chunkText);
+        currentLoadedChunkIndex = targetIndex;
+
+        console.log(`Loaded Chunk ${targetIndex + 1}/${chunks.length} into memory.`);
+    } catch (error) {
+        console.error("Error loading chunk:", error);
+    } finally {
+        // Hide the overlay (even if it crashes, we must hide it)
+        overlay.style.display = 'none';
+    }
+
+    if (wasPlaying) togglePlayback();
 }
 
 function clearLines() {
