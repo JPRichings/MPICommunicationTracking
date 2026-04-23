@@ -29,7 +29,10 @@
                 <input type="range" id="timeSlider" min="0" max="100" value="0" step="0.001" disabled>
                 <div class="playback-controls">
                     <button id="btn-play" disabled>▶ Play</button>
-                    <label>Speed: <input type="range" id="speedSlider" min="0.1" max="5" value="1" step="0.1"></label>
+                    <div style="margin-top: 10px;">
+                        <label style="font-size: 0.8rem; color: #8b949e;">Speed: <span id="speedLabel" style="color: #58a6ff;">1.000x</span></label>
+                        <input type="range" id="speedSlider" min="-3" max="2" value="0" step="any" style="width: 100%;">
+                    </div>
                 </div>
             </div>
             <div class="stats-panel" style="margin-top: 20px; padding: 15px; background: #161b22; border-radius: 6px;">

@@ -22,18 +22,23 @@ let uploadedFilePointer = null;
 let currentLoadedChunkIndex = -1; // Keep track of what chunk is currently in RAM
 let headerLengthOffset = 0;       // Math offset for finding chunks
 
+let isChunkLoading = false;
+
 document.addEventListener("DOMContentLoaded", () => {
     initThreeJS();
     document.getElementById("profileLoader").addEventListener("change", handleFileUpload);
     
-    // Just update the text label visually while dragging so it feels responsive
     document.getElementById("timeSlider").addEventListener("input", (e) => {
         document.getElementById("currentTimeLabel").textContent = parseFloat(e.target.value).toFixed(3);
     });
-    
-    // When the user lets go of the mouse, actually do the heavy chunk load
     document.getElementById("timeSlider").addEventListener("change", handleManualSeek);
     
+    document.getElementById("speedSlider").addEventListener("input", (e) => {
+        const rawValue = parseFloat(e.target.value);
+        const actualSpeed = Math.pow(10, rawValue);
+        document.getElementById("speedLabel").textContent = actualSpeed.toFixed(3) + "x";
+    });
+
     document.getElementById("btn-play").addEventListener("click", togglePlayback);
 });
 
@@ -134,27 +139,29 @@ function initDashboard() {
     const topology = parsedData.topology;
 
     const chunks = parsedData.chunks;
+    const minTime = (chunks && chunks.length > 0) ? chunks[0].t_start : 0;
     maxTime = (chunks && chunks.length > 0) ? chunks[chunks.length - 1].t_end : 0;
 
-    if (maxTime > 0) {
-         timeMultiplier = maxTime / 10.0;
+    const duration = maxTime - minTime;
+    if (duration > 0) {
+         timeMultiplier = duration / 10.0;
     } else {
          timeMultiplier = 1;
     }    
 
-    // Use "any" so the browser doesn't snap or lock the slider
-    document.getElementById("timeSlider").step = "any"; 
-    document.getElementById("timeSlider").max = maxTime;
-    document.getElementById("timeSlider").disabled = false;
+    const slider = document.getElementById("timeSlider");
+    slider.step = "any"; 
+    slider.min = minTime;  
+    slider.max = maxTime;
+    slider.disabled = false;
     document.getElementById("btn-play").disabled = false;
 
     buildHardwareTopology(topology);
     
-    // We must build the tables before we seek to 0
     renderSpectrogram();
     initDynamicSpectrogram();
     
-    seekToTime(0);
+    seekToTime(minTime); 
 }
 
 // Add a hostname map to the top of your file with the other globals
@@ -537,83 +544,44 @@ async function seekToTime(time) {
     updateDynamicSpectrogram(currentTime);
 }
 
-async function ensureChunkLoadedForTime(time) {
-    const chunks = parsedData.chunks;
-    if (!chunks) return;
-
-    // Find which chunk this timestamp belongs to
-    let targetIndex = chunks.findIndex(c => time >= c.t_start && time <= c.t_end);
-    
-    // Fallback: If time is before the first chunk or after the last
-    if (targetIndex === -1 && time < chunks[0].t_start) targetIndex = 0;
-    if (targetIndex === -1 && time > chunks[chunks.length - 1].t_end) targetIndex = chunks.length - 1;
-
-    // If we already have this chunk in RAM, do nothing!
-    if (targetIndex === currentLoadedChunkIndex) return;
-
-    // We need a new chunk! Pause playback while we read from the hard drive
-    const wasPlaying = isPlaying;
-    if (wasPlaying) pausePlayback();
-
-    const chunk = chunks[targetIndex];
-    
-    // Calculate exact absolute byte position in the file
-    const absoluteStart = headerLengthOffset + chunk.offset;
-    const absoluteEnd = absoluteStart + chunk.size;
-
-    // Slice -> Unzip -> Parse
-    const chunkBlob = uploadedFilePointer.slice(absoluteStart, absoluteEnd);
-    const chunkText = await decompressBlob(chunkBlob);
-    
-    // Swap the old 500k array out of RAM, let the Garbage Collector eat it, and load the new one
-    parsedData.timeline = JSON.parse(chunkText);
-    currentLoadedChunkIndex = targetIndex;
-
-    console.log(`Loaded Chunk ${targetIndex + 1}/${chunks.length} into memory.`);
-
-    if (wasPlaying) togglePlayback();
-}
 
 async function ensureChunkLoadedForTime(time) {
     const chunks = parsedData.chunks;
     if (!chunks) return;
 
-    // Find which chunk this timestamp belongs to
-    let targetIndex = chunks.findIndex(c => time >= c.t_start && time <= c.t_end);
-    
-    // Fallback: If time is before the first chunk or after the last
-    if (targetIndex === -1 && time < chunks[0].t_start) targetIndex = 0;
-    if (targetIndex === -1 && time > chunks[chunks.length - 1].t_end) targetIndex = chunks.length - 1;
+    let targetIndex = chunks.findIndex(c => time <= c.t_end);
+    if (targetIndex === -1) targetIndex = chunks.length - 1;
 
-    // If we already have this chunk in RAM, do nothing!
     if (targetIndex === currentLoadedChunkIndex) return;
 
-    // We need a new chunk! Pause playback.
-    const wasPlaying = isPlaying;
-    if (wasPlaying) pausePlayback();
+    // If another chunk is currently loading, wait for it to finish
+    while (isChunkLoading) {
+        await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    
+    // After waiting in line, verify we stillneed this chunk. 
+    // (The user might have scrubbed away to a different time while we were waiting)
+    targetIndex = chunks.findIndex(c => time <= c.t_end);
+    if (targetIndex === -1) targetIndex = chunks.length - 1;
+    if (targetIndex === currentLoadedChunkIndex) return;
 
-    // Show a loading overlay
+    isChunkLoading = true; 
+
     const overlay = document.getElementById('loadingOverlay');
     const loadingText = document.getElementById('loadingText');
     overlay.style.display = 'block';
     loadingText.textContent = `Unpacking Chunk ${targetIndex + 1} of ${chunks.length}...`;
 
-    // Give the browser 1 frame to draw the UI before we lock the CPU
-//    await new Promise(resolve => requestAnimationFrame(resolve));
     await new Promise(resolve => setTimeout(resolve, 15));
 
     try {
         const chunk = chunks[targetIndex];
-        
-        // Calculate exact absolute byte position in the file
         const absoluteStart = headerLengthOffset + chunk.offset;
         const absoluteEnd = absoluteStart + chunk.size;
 
-        // Slice -> Unzip -> Parse
         const chunkBlob = uploadedFilePointer.slice(absoluteStart, absoluteEnd);
         const chunkText = await decompressBlob(chunkBlob);
         
-        // Swap the arrays
         parsedData.timeline = JSON.parse(chunkText);
         currentLoadedChunkIndex = targetIndex;
 
@@ -621,11 +589,9 @@ async function ensureChunkLoadedForTime(time) {
     } catch (error) {
         console.error("Error loading chunk:", error);
     } finally {
-        // Hide the overlay (even if it crashes, we must hide it)
         overlay.style.display = 'none';
+        isChunkLoading = false; 
     }
-
-    if (wasPlaying) togglePlayback();
 }
 
 function clearLines() {
@@ -665,10 +631,11 @@ async function playLoop(timestamp) {
     const deltaTime = (timestamp - lastFrameTime) / 1000;
     lastFrameTime = timestamp;
 
-    // Max visual jump is 50ms, protecting against chunk-load stutter
     const cappedDelta = Math.min(deltaTime, 0.05);
+    
+    const rawSpeedVal = parseFloat(document.getElementById("speedSlider").value);
+    const speed = Math.pow(10, rawSpeedVal);
 
-    const speed = parseFloat(document.getElementById("speedSlider").value);
     let nextTime = currentTime + (cappedDelta * timeMultiplier * speed);
 
     if (timestamp - lastDynUpdate > 100) {
