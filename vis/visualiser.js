@@ -261,7 +261,8 @@ function initDynamicSpectrogram() {
     const bins = Object.keys(stats[calls[0]]);
 
     const table = document.createElement('table');
-    table.style.borderCollapse = 'collapse';
+    table.style.borderCollapse = 'separate';
+    table.style.borderSpacing = '3px';
     table.style.width = '100%';
     table.style.color = '#c9d1d9';
     table.style.fontSize = '0.75rem';
@@ -296,13 +297,16 @@ function initDynamicSpectrogram() {
         tr.appendChild(tdLabel);
 
         bins.forEach(bin => {
-            const td = document.createElement('td');
-            td.style.backgroundColor = `rgba(46, 160, 67, 0)`; // Start empty (Green scale)
-            td.style.border = '1px solid #30363d';
-            td.style.height = '24px';
-            
-            dynamicCells[call][bin] = td; // Save reference for fast updates
-            tr.appendChild(td);
+        const td = document.createElement('td');
+            td.style.border = 'none';
+            td.style.borderRadius = '3px';
+            td.style.height = '20px';
+            td.style.width = '35px';
+            td.style.backgroundColor = '#161b22'; 
+            td.style.transition = 'background-color 0.15s ease-out'; 
+
+            dynamicCells[call][bin] = td;
+            tr.appendChild(td);     
         });
         table.appendChild(tr);
     });
@@ -350,15 +354,20 @@ function updateDynamicSpectrogram(currentVisualTime) {
     // Update the background colors of our pre-built HTML table
     calls.forEach(call => {
         binsTemplate.forEach(bin => {
+            // Inside updateDynamicSpectrogram's update loop:
             const count = currentCounts[call][bin];
             const td = dynamicCells[call][bin];
 
-            let intensity = 0;
-            if (count > 0) {
-                intensity = Math.max(0.15, Math.log10(count + 1) / Math.log10(globalMax + 1));
-            }
-            // Use GitHub Success Green to distinguish from the blue static map
-            td.style.backgroundColor = `rgba(46, 160, 67, ${intensity})`; 
+            if (count === 0) {
+               // Return to the empty state color
+               td.style.backgroundColor = '#161b22';
+            } else {
+              // Calculate intensity (e.g., using a logarithmic scale or linear scale)
+              // Here we ensure a minimum alpha of 0.15 so even 1 message is clearly visible
+              const intensity = Math.max(0.15, count / globalMax); 
+    
+              td.style.backgroundColor = `rgba(46, 160, 67, ${intensity})`;
+            } 
             td.title = `${call} | ${bin}:\n${count.toLocaleString()} messages (Accumulated)`; 
         });
     });
@@ -386,7 +395,8 @@ function renderSpectrogram() {
 
     // Build the HTML Table
     const table = document.createElement('table');
-    table.style.borderCollapse = 'collapse';
+    table.style.borderCollapse = 'separate';
+    table.style.borderSpacing = '3px'
     table.style.width = '100%';
     table.style.color = '#c9d1d9';
     table.style.fontSize = '0.75rem';
@@ -420,6 +430,12 @@ function renderSpectrogram() {
         tdLabel.style.fontWeight = '600';
         tr.appendChild(tdLabel);
 
+        let globalMax = 0;
+
+        calls.forEach(c => bins.forEach(b => {
+           if (stats[c][b] > globalMax) globalMax = stats[c][b];
+        }));
+ 
         // Heatmap Cells
         bins.forEach(bin => {
             const count = stats[call][bin] || 0;
@@ -427,12 +443,17 @@ function renderSpectrogram() {
 
             // Logarithmic color scaling (0.0 to 1.0 intensity)
             let intensity = 0;
-            if (count > 0) {
-                // Math.max ensures even 1 message gets a faint color (0.15) instead of being invisible
-                intensity = Math.max(0.15, Math.log10(count + 1) / Math.log10(maxCount + 1));
+            if (count === 0) {
+               // Return to the empty state color
+               td.style.backgroundColor = '#161b22';
+            } else {
+              // Calculate intensity (e.g., using a logarithmic scale or linear scale)
+              // Here we ensure a minimum alpha of 0.15 so even 1 message is clearly visible
+              const intensity = Math.max(0.15, count / globalMax);
+
+              td.style.backgroundColor = `rgba(88, 166, 255, ${intensity})`;
             }
 
-            td.style.backgroundColor = `rgba(88, 166, 255, ${intensity})`; // GitHub Blue
             td.style.border = '1px solid #30363d'; // Cell grid lines
             td.style.height = '24px';
             
