@@ -1,33 +1,76 @@
-// Global State
+// ==========================================
+// GLOBALS & STATE
+// ==========================================
+let scene, camera, renderer, controls;
 let parsedData = null;
-let nodeMap = new Map();
+
+// Chunking & Async IO State
+let uploadedFilePointer = null;
+let currentLoadedChunkIndex = -1;
+let headerLengthOffset = 0;
+let isChunkLoading = false; // Mutex Lock
 
 // Playback State
-let isPlaying = false;
 let currentTime = 0;
+let minTime = 0;
 let maxTime = 0;
-let animationFrameId = null;
-const TIME_WINDOW = 0.05; 
-
-// Three.js Core Variables
-let scene, camera, renderer, controls;
-let linesGroup;
-
 let timeMultiplier = 1;
+let isPlaying = false;
+let animationFrameId;
+let lastFrameTime = 0;
+let lastDynUpdate = 0;
+let isProcessingFrame = false;
 
-let dynamicCells = {}; // Fast lookup for the HTML table cells
-let lastDynUpdate = 0; // Throttle timer for the play loop
+// 3D Maps & Caches
+const nodeMap = new Map();  // Maps hostname -> Node Group
+const rankMap = new Map();  // Maps rank ID -> Process Mesh
+let activeLines = [];       // Currently rendered bezier curves
+let junctionPoints = [];    // Active receive/send ports
+let dynamicCells = {};      // HTML Table cell references
 
-let uploadedFilePointer = null;
-let currentLoadedChunkIndex = -1; // Keep track of what chunk is currently in RAM
-let headerLengthOffset = 0;       // Math offset for finding chunks
+// ==========================================
+// CONFIGURATION & CATEGORIES
+// ==========================================
+const MPI_CATEGORIES = {
+    // 1. P2P Blocking (Blue)
+    "MPI_SEND": { type: "p2p_block", color: 0x58a6ff },
+    "MPI_RECV": { type: "p2p_block", color: 0x58a6ff },
+    "MPI_BSEND": { type: "p2p_block", color: 0x58a6ff },
+    "MPI_SSEND": { type: "p2p_block", color: 0x58a6ff },
+    "MPI_RSEND": { type: "p2p_block", color: 0x58a6ff },
+    "MPI_SENDRECV": { type: "p2p_block", color: 0x58a6ff },
 
-let isChunkLoading = false;
+    // 2. P2P Non-Blocking (Teal)
+    "MPI_ISEND": { type: "p2p_nonblock", color: 0x3fb950 },
+    "MPI_IRECV": { type: "p2p_nonblock", color: 0x3fb950 },
+    "MPI_IBSEND": { type: "p2p_nonblock", color: 0x3fb950 },
+    "MPI_ISSEND": { type: "p2p_nonblock", color: 0x3fb950 },
+    "MPI_IRSEND": { type: "p2p_nonblock", color: 0x3fb950 },
+    
+    // States (Dimmer Teal)
+    "MPI_WAIT": { type: "state", color: 0x238636 },
+    "MPI_WAITALL": { type: "state", color: 0x238636 },
 
+    // 3. Collectives (Orange)
+    "MPI_BCAST": { type: "collective", color: 0xd29922 },
+    "MPI_REDUCE": { type: "collective", color: 0xd29922 },
+    "MPI_ALLREDUCE": { type: "collective", color: 0xd29922 },
+    "MPI_GATHER": { type: "collective", color: 0xd29922 },
+    "MPI_SCATTER": { type: "collective", color: 0xd29922 },
+    "MPI_ALLGATHER": { type: "collective", color: 0xd29922 },
+    "MPI_BARRIER": { type: "collective", color: 0xd29922 }
+};
+const DEFAULT_CATEGORY = { type: "unknown", color: 0x8b949e };
+
+// ==========================================
+// INITIALIZATION
+// ==========================================
 document.addEventListener("DOMContentLoaded", () => {
     initThreeJS();
+    
     document.getElementById("profileLoader").addEventListener("change", handleFileUpload);
     
+    // Sliders
     document.getElementById("timeSlider").addEventListener("input", (e) => {
         document.getElementById("currentTimeLabel").textContent = parseFloat(e.target.value).toFixed(3);
     });
@@ -42,529 +85,94 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("btn-play").addEventListener("click", togglePlayback);
 });
 
-async function decompressBlob(blob) {
-    const ds = new DecompressionStream('deflate'); // zlib uses deflate
-    const decompressedStream = blob.stream().pipeThrough(ds);
-    return await new Response(decompressedStream).text();
-}
-
 function initThreeJS() {
-    const container = document.getElementById('visCanvas');
-    
+    const container = document.getElementById("visCanvas");
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0d1117);
+    scene.fog = new THREE.FogExp2(0x0d1117, 0.002);
 
-    // Camera setup
-    camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 1, 1000);
-    camera.position.set(0, 50, 150);
+    camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 2000);
+    camera.position.set(0, 100, 300);
 
-    // Renderer setup
-    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(container.clientWidth, container.clientHeight);
+    renderer.setClearColor(0x0d1117, 1);
     container.appendChild(renderer.domElement);
 
-    // Controls setup (allows dragging to rotate, scrolling to zoom)
     controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
 
-    // Lights
+    controls.listenToKeyEvents(window);
+    controls.keyPanSpeed = 20.0; // Adjust how fast the camera moves
+    // Map panning to W, A, S, D (or keep default Arrow Keys)
+    controls.keys = {
+        LEFT: 'KeyA',
+        UP: 'KeyW',
+        RIGHT: 'KeyD',
+        BOTTOM: 'KeyS'
+    }; 
+
+    const grid = new THREE.GridHelper(1000, 50, 0x30363d, 0x21262d);
+    grid.position.y = -10;
+    scene.add(grid);
+
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
     scene.add(ambientLight);
-    const pointLight = new THREE.PointLight(0x58a6ff, 1);
-    pointLight.position.set(50, 100, 50);
-    scene.add(pointLight);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
+    dirLight.position.set(200, 500, 300);
+    scene.add(dirLight);
 
-    // Group to hold active communication lines
-    linesGroup = new THREE.Group();
-    scene.add(linesGroup);
-
-    // Start render loop
-    const animate = function () {
-        requestAnimationFrame(animate);
-        controls.update();
-        renderer.render(scene, camera);
-    };
-    animate();
-
-    // Handle window resize
-    window.addEventListener('resize', () => {
-        camera.aspect = container.clientWidth / container.clientHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(container.clientWidth, container.clientHeight);
-    });
+    animateThreeJS();
 }
 
+function animateThreeJS() {
+    requestAnimationFrame(animateThreeJS);
+    controls.update();
+    
+    // Smoothly decay the emissive glow of rank processes
+    rankMap.forEach(mesh => {
+        if (mesh.material.emissiveIntensity > 0) {
+            mesh.material.emissiveIntensity -= 0.02; // Fade out over ~50 frames
+            if (mesh.material.emissiveIntensity < 0) mesh.material.emissiveIntensity = 0;
+        }
+    });
+
+    renderer.render(scene, camera);
+}
+
+// ==========================================
+// CHUNK LOADING (.mpix)
+// ==========================================
+async function decompressBlob(blob) {
+    const ds = new DecompressionStream('deflate');
+    const decompressedStream = blob.stream().pipeThrough(ds);
+    return await new Response(decompressedStream).text();
+}
 
 async function handleFileUpload(event) {
     uploadedFilePointer = event.target.files[0];
     if (!uploadedFilePointer) return;
 
     try {
-        // Read the first 4 bytes to find out how big the header is
-        const sizeBuf = await uploadedFilePointer.slice(0, 4).arrayBuffer();
-        const headerSize = new DataView(sizeBuf).getUint32(0, true); // little-endian
-        
-        headerLengthOffset = 4 + headerSize; // Where the chunks start in the file
+        if (uploadedFilePointer.name.endsWith('.mpix')) {
+            const sizeBuf = await uploadedFilePointer.slice(0, 4).arrayBuffer();
+            const headerSize = new DataView(sizeBuf).getUint32(0, true);
+            headerLengthOffset = 4 + headerSize;
 
-        // Slice out the header, decompress it, and parse it
-        const headerBlob = uploadedFilePointer.slice(4, headerLengthOffset);
-        const headerText = await decompressBlob(headerBlob);
-        
-        // parsedData now contains everything except the timeline
-        parsedData = JSON.parse(headerText);
-        parsedData.timeline = []; // Initialize empty timeline
-        
-        initDashboard();
-        
-    } catch (error) {
-        console.error("Failed to unpack the .mpix container:", error);
-    }
-}
-
-function initDashboard() {
-    pausePlayback();
-    nodeMap.clear();
-
-    // Clear existing nodes and lines from the scene
-    const objectsToRemove = [];
-    scene.traverse(child => {
-        if (child.name === "mpiNode" || child.name === "cabinetBox") {
-            objectsToRemove.push(child);
-        }
-    });
-    objectsToRemove.forEach(obj => scene.remove(obj));
-    clearLines();
-
-    const topology = parsedData.topology;
-
-    const chunks = parsedData.chunks;
-    const minTime = (chunks && chunks.length > 0) ? chunks[0].t_start : 0;
-    maxTime = (chunks && chunks.length > 0) ? chunks[chunks.length - 1].t_end : 0;
-
-    const duration = maxTime - minTime;
-    if (duration > 0) {
-         timeMultiplier = duration / 10.0;
-    } else {
-         timeMultiplier = 1;
-    }    
-
-    const slider = document.getElementById("timeSlider");
-    slider.step = "any"; 
-    slider.min = minTime;  
-    slider.max = maxTime;
-    slider.disabled = false;
-    document.getElementById("btn-play").disabled = false;
-
-    buildHardwareTopology(topology);
-    
-    renderSpectrogram();
-    initDynamicSpectrogram();
-    
-    seekToTime(minTime); 
-}
-
-// Add a hostname map to the top of your file with the other globals
-let hostnameMap = new Map();
-
-function buildHardwareTopology(nodesData) {
-    const nodeGeometry = new THREE.BoxGeometry(12, 2, 12); 
-
-    // Aesthetic Materials
-    const idleMaterial = new THREE.MeshPhongMaterial({ 
-        color: 0x8b949e,       // Lighter gray
-        transparent: true, 
-        opacity: 0.15,         // Very sheer
-        depthWrite: false,     // Fixes overlapping transparency glitches
-        blending: THREE.AdditiveBlending // Gives them a slight holographic look
-    });
-    const allocatedMaterial = new THREE.MeshPhongMaterial({ 
-        color: 0x8b949e, emissive: 0x000000 
-    });
-
-    let maxY = 0;
-    hostnameMap.clear();
-
-    // Draw the Datacenter Floor Grid
-    const gridHelper = new THREE.GridHelper(1000, 50, 0x30363d, 0x161b22);
-    gridHelper.position.y = -10; // Put it slightly beneath the lowest node
-    scene.add(gridHelper);
-
-    // Draw the full hardware blueprint (Idle Nodes & Racks)
-    if (parsedData.hardware_blueprint && parsedData.hardware_blueprint.cabinets) {
-        parsedData.hardware_blueprint.cabinets.forEach(cab => {
-            cab.racks.forEach(rack => {
-                const rackGroup = new THREE.Group();
-                scene.add(rackGroup);
-
-                rack.nodes.forEach(node => {
-                    const x = cab.x + rack.x_offset;
-                    const y = node.slot * 4; // Height
-                    const z = cab.z + rack.z_offset;
-
-                    // Create idle node
-                    const mesh = new THREE.Mesh(nodeGeometry, idleMaterial.clone());
-                    mesh.position.set(x, y, z);
-                    mesh.name = "mpiNode";
-                    rackGroup.add(mesh);
-
-                    // Track highest Y for camera centering
-                    if (y > maxY) maxY = y;
-
-                    // Save to hostname map so we can find it later
-                    hostnameMap.set(node.hostname, { x, y, z, mesh: mesh, rank: null });
-                });
-
-                // Wrap the Rack in a visible wireframe bounding box
-                const rackBox = new THREE.BoxHelper(rackGroup, 0x30363d);
-                scene.add(rackBox);
-            });
-        });
-    }
-
-    // Highlight the Allocated MPI Ranks
-    nodesData.forEach(d => {
-        let target = hostnameMap.get(d.hostname);
-        
-        if (target) {
-            // Upgrade the material from "Idle" to "Allocated"
-            target.mesh.material = allocatedMaterial.clone();
-            target.rank = d.rank;
-            // Map the Rank ID to this specific mesh for line drawing
-            nodeMap.set(d.rank, target);
+            const headerBlob = uploadedFilePointer.slice(4, headerLengthOffset);
+            const headerText = await decompressBlob(headerBlob);
+            
+            parsedData = JSON.parse(headerText);
+            parsedData.timeline = [];
         } else {
-            // Fallback: If hardware map is missing, just draw them randomly
-            const mesh = new THREE.Mesh(nodeGeometry, allocatedMaterial.clone());
-            mesh.position.set(d.x, d.y, d.z);
-            scene.add(mesh);
-            nodeMap.set(d.rank, { x: d.x, y: d.y, z: d.z, mesh: mesh });
+            alert("Please upload a packaged .mpix file for large traces.");
+            return;
         }
-    });
-
-    // Center Camera
-    const centerY = maxY / 2;
-    camera.position.set(0, centerY, maxY > 0 ? maxY * 1.2 : 150);
-    controls.target.set(0, centerY, 0);
-    controls.update();
-}
-
-function initDynamicSpectrogram() {
-    const stats = parsedData.statistics;
-    if (!stats) return;
-
-    const container = document.getElementById('dynamicSpectrogramContainer');
-    container.innerHTML = ''; 
-    dynamicCells = {}; 
-
-    const calls = Object.keys(stats);
-    if (calls.length === 0) return;
-    const bins = Object.keys(stats[calls[0]]);
-
-    const table = document.createElement('table');
-    table.style.borderCollapse = 'separate';
-    table.style.borderSpacing = '3px';
-    table.style.width = '100%';
-    table.style.color = '#c9d1d9';
-    table.style.fontSize = '0.75rem';
-    table.style.fontFamily = "'Fira Code', monospace";
-
-    // Header Row
-    const thead = document.createElement('tr');
-    thead.appendChild(document.createElement('th')); 
-    bins.forEach(b => {
-        const th = document.createElement('th');
-        th.textContent = b.replace(' - ', '\n');
-        th.style.padding = '4px 2px';
-        th.style.textAlign = 'center';
-        th.style.color = '#8b949e';
-        th.style.fontWeight = 'normal';
-        th.style.whiteSpace = 'pre-wrap';
-        thead.appendChild(th);
-    });
-    table.appendChild(thead);
-
-    // Data Rows
-    calls.forEach(call => {
-        const tr = document.createElement('tr');
-        dynamicCells[call] = {}; // Initialize fast lookup for this row
-        
-        const tdLabel = document.createElement('td');
-        tdLabel.textContent = call.replace('MPI_', ''); 
-        tdLabel.style.padding = '4px 8px 4px 0';
-        tdLabel.style.textAlign = 'right';
-        tdLabel.style.color = '#8b949e';
-        tdLabel.style.fontWeight = '600';
-        tr.appendChild(tdLabel);
-
-        bins.forEach(bin => {
-        const td = document.createElement('td');
-            td.style.border = 'none';
-            td.style.borderRadius = '3px';
-            td.style.height = '20px';
-            td.style.width = '35px';
-            td.style.backgroundColor = '#161b22'; 
-            td.style.transition = 'background-color 0.15s ease-out'; 
-
-            dynamicCells[call][bin] = td;
-            tr.appendChild(td);     
-        });
-        table.appendChild(tr);
-    });
-    container.appendChild(table);
-}
-
-function updateDynamicSpectrogram(currentVisualTime) {
-    if (!parsedData || !dynamicCells) return;
-
-    const stats = parsedData.statistics;
-    const calls = Object.keys(stats);
-    if (calls.length === 0) return;
-    const binsTemplate = Object.keys(stats[calls[0]]);
-
-    // Initialize empty counts for the current slice of time
-    let currentCounts = {};
-    calls.forEach(c => {
-        currentCounts[c] = {};
-        binsTemplate.forEach(b => currentCounts[c][b] = 0);
-    });
-
-    // Tally all messages up to the current time slider position
-    for (let i = 0; i < parsedData.timeline.length; i++) {
-        const event = parsedData.timeline[i];
-        if (event.time > currentVisualTime) break; // Timeline is chronological, so we stop early
-        
-        const call = event.call;
-        if (currentCounts[call] !== undefined) {
-            const bytes = event.bytes || 0;
-            if (bytes < 128) currentCounts[call]["< 128B"]++;
-            else if (bytes < 1024) currentCounts[call]["128B - 1KB"]++;
-            else if (bytes < 65536) currentCounts[call]["1KB - 64KB"]++;
-            else if (bytes < 1048576) currentCounts[call]["64KB - 1MB"]++;
-            else if (bytes < 16777216) currentCounts[call]["1MB - 16MB"]++;
-            else currentCounts[call]["> 16MB"]++;
-        }
+        initDashboard();
+    } catch (error) {
+        console.error("Failed to unpack:", error);
     }
-
-    // Find the global max from the STATIC stats so the colors fill up proportionally
-    let globalMax = 0;
-    calls.forEach(c => binsTemplate.forEach(b => {
-        if (stats[c][b] > globalMax) globalMax = stats[c][b];
-    }));
-
-    // Update the background colors of our pre-built HTML table
-    calls.forEach(call => {
-        binsTemplate.forEach(bin => {
-            // Inside updateDynamicSpectrogram's update loop:
-            const count = currentCounts[call][bin];
-            const td = dynamicCells[call][bin];
-
-            if (count === 0) {
-               // Return to the empty state color
-               td.style.backgroundColor = '#161b22';
-            } else {
-              // Calculate intensity (e.g., using a logarithmic scale or linear scale)
-              // Here we ensure a minimum alpha of 0.15 so even 1 message is clearly visible
-              const intensity = Math.max(0.15, count / globalMax); 
-    
-              td.style.backgroundColor = `rgba(46, 160, 67, ${intensity})`;
-            } 
-            td.title = `${call} | ${bin}:\n${count.toLocaleString()} messages (Accumulated)`; 
-        });
-    });
 }
-
-function renderSpectrogram() {
-    const stats = parsedData.statistics;
-    if (!stats) return;
-
-    const container = document.getElementById('spectrogramContainer');
-    container.innerHTML = ''; // Clear previous data
-
-    const calls = Object.keys(stats);
-    if (calls.length === 0) return;
-
-    const bins = Object.keys(stats[calls[0]]); // e.g., ["< 128B", "128B -  1KB", "1KB - 64KB", ...]
-
-    // Find the global maximum to scale our colors properly
-    let maxCount = 0;
-    calls.forEach(c => {
-        bins.forEach(b => {
-            if (stats[c][b] > maxCount) maxCount = stats[c][b];
-        });
-    });
-
-    // Build the HTML Table
-    const table = document.createElement('table');
-    table.style.borderCollapse = 'separate';
-    table.style.borderSpacing = '3px'
-    table.style.width = '100%';
-    table.style.color = '#c9d1d9';
-    table.style.fontSize = '0.75rem';
-    table.style.fontFamily = "'Fira Code', monospace";
-
-    // Create the Header Row (Size Bins)
-    const thead = document.createElement('tr');
-    thead.appendChild(document.createElement('th')); // Empty top-left corner
-    bins.forEach(b => {
-        const th = document.createElement('th');
-        th.textContent = b.replace(' - ', '\n'); // Wrap text for space
-        th.style.padding = '4px 2px';
-        th.style.textAlign = 'center';
-        th.style.color = '#8b949e';
-        th.style.fontWeight = 'normal';
-        th.style.whiteSpace = 'pre-wrap'; // Allow newline
-        thead.appendChild(th);
-    });
-    table.appendChild(thead);
-
-    // Create the Data Rows (MPI Functions)
-    calls.forEach(call => {
-        const tr = document.createElement('tr');
-        
-        // Row Label (Remove "MPI_" to save horizontal space)
-        const tdLabel = document.createElement('td');
-        tdLabel.textContent = call.replace('MPI_', ''); 
-        tdLabel.style.padding = '4px 8px 4px 0';
-        tdLabel.style.textAlign = 'right';
-        tdLabel.style.color = '#8b949e';
-        tdLabel.style.fontWeight = '600';
-        tr.appendChild(tdLabel);
-
-        let globalMax = 0;
-
-        calls.forEach(c => bins.forEach(b => {
-           if (stats[c][b] > globalMax) globalMax = stats[c][b];
-        }));
- 
-        // Heatmap Cells
-        bins.forEach(bin => {
-            const count = stats[call][bin] || 0;
-            const td = document.createElement('td');
-
-            // Logarithmic color scaling (0.0 to 1.0 intensity)
-            let intensity = 0;
-            if (count === 0) {
-               // Return to the empty state color
-               td.style.backgroundColor = '#161b22';
-            } else {
-              // Calculate intensity (e.g., using a logarithmic scale or linear scale)
-              // Here we ensure a minimum alpha of 0.15 so even 1 message is clearly visible
-              const intensity = Math.max(0.15, count / globalMax);
-
-              td.style.backgroundColor = `rgba(88, 166, 255, ${intensity})`;
-            }
-
-            td.style.border = '1px solid #30363d'; // Cell grid lines
-            td.style.height = '24px';
-            
-            // Add a native hover tooltip so users can see the exact number
-            td.title = `${call} | ${bin}:\n${count.toLocaleString()} messages`; 
-
-            // This adds numbers inside the boxes
-            // td.textContent = count > 0 ? count : '';
-            // td.style.textAlign = 'center';
-            // td.style.color = intensity > 0.5 ? '#0d1117' : '#c9d1d9'; // Dynamic text contrast
-
-            tr.appendChild(td);
-        });
-        table.appendChild(tr);
-    });
-
-    container.appendChild(table);
-}
-
-function renderActiveCommunications() {
-    clearLines();
-
-    // Messages happen every ~3 microseconds. A window of 10 microseconds (0.000010) 
-    // is perfect to see 3-4 boxes flying across the gap simultaneously.
-    const DYNAMIC_WINDOW = 0.000010;
-
-    const activeEvents = parsedData.timeline.filter(d => 
-        d.time <= currentTime && d.time >= (currentTime - DYNAMIC_WINDOW)
-        && d.sender !== d.receiver 
-    );
-
-    const wireMaterial = new THREE.LineBasicMaterial({ 
-        color: 0x58a6ff, 
-        transparent: true, 
-        opacity: 0.15,
-        blending: THREE.AdditiveBlending 
-    });
-
-    const packetGeometry = new THREE.BoxGeometry(2.5, 2.5, 2.5);
-    const packetMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
-
-
-    activeEvents.forEach(event => {
-        const sender = nodeMap.get(event.sender);
-        const receiver = nodeMap.get(event.receiver);
-
-        if (sender && receiver) {
-            const vStart = new THREE.Vector3(sender.x, sender.y, sender.z);
-            const vEnd = new THREE.Vector3(receiver.x, receiver.y, receiver.z);
-            
-            const distance = vStart.distanceTo(vEnd);
-            const vMid = new THREE.Vector3().addVectors(vStart, vEnd).multiplyScalar(0.5);
-            
-            const laneOffset = (event.sender < event.receiver) ? 1 : -1;
-            const bulgeAmount = Math.max(20, distance * 0.4); 
-            vMid.x += bulgeAmount * laneOffset; 
-            vMid.z += bulgeAmount * 0.2 * laneOffset; 
-
-            const curve = new THREE.QuadraticBezierCurve3(vStart, vMid, vEnd);
-            
-            // Only draw the faint wire once per direction to prevent it from glowing too brightly 
-            // when multiple messages are overlapping on the exact same curve.
-            if (event === activeEvents.find(e => e.sender === event.sender)) {
-                const points = curve.getPoints(20);
-                const geometry = new THREE.BufferGeometry().setFromPoints(points);
-                const line = new THREE.Line(geometry, wireMaterial);
-                linesGroup.add(line);
-            }
-            
-            const ageOfMessage = currentTime - event.time;
-            let progress = ageOfMessage / DYNAMIC_WINDOW;
-            
-            // Draw every single packet that is currently in flight
-            if (progress >= 0 && progress <= 1.0) {
-                const packetPos = curve.getPoint(progress);
-                const packet = new THREE.Mesh(packetGeometry, packetMaterial);
-                packet.position.copy(packetPos);
-                linesGroup.add(packet);
-            }
-
-            sender.mesh.material.emissive.setHex(0x1f6feb); 
-            receiver.mesh.material.emissive.setHex(0x2ea043); 
-        }
-    });
-
-    nodeMap.forEach((data, rank) => {
-        const isActive = activeEvents.some(e => e.sender === rank || e.receiver === rank);
-        if (!isActive) {
-            data.mesh.material.emissive.setHex(0x000000);
-        }
-    });
-}
-
-async function handleManualSeek(event) {
-    pausePlayback();
-    // Await the new chunk loading before updating the UI
-    await seekToTime(parseFloat(event.target.value));
-}
-
-async function seekToTime(time) {
-    currentTime = time;
-    document.getElementById("timeSlider").value = currentTime;
-    document.getElementById("currentTimeLabel").textContent = currentTime.toFixed(3);
-    
-    // Check if we need to load a new chunk from disk
-    await ensureChunkLoadedForTime(currentTime);
-    
-    renderActiveCommunications();
-    updateDynamicSpectrogram(currentTime);
-}
-
 
 async function ensureChunkLoadedForTime(time) {
     const chunks = parsedData.chunks;
@@ -572,16 +180,13 @@ async function ensureChunkLoadedForTime(time) {
 
     let targetIndex = chunks.findIndex(c => time <= c.t_end);
     if (targetIndex === -1) targetIndex = chunks.length - 1;
-
     if (targetIndex === currentLoadedChunkIndex) return;
 
-    // If another chunk is currently loading, wait for it to finish
+    // Mutex Lock
     while (isChunkLoading) {
         await new Promise(resolve => setTimeout(resolve, 10));
     }
     
-    // After waiting in line, verify we stillneed this chunk. 
-    // (The user might have scrubbed away to a different time while we were waiting)
     targetIndex = chunks.findIndex(c => time <= c.t_end);
     if (targetIndex === -1) targetIndex = chunks.length - 1;
     if (targetIndex === currentLoadedChunkIndex) return;
@@ -605,8 +210,7 @@ async function ensureChunkLoadedForTime(time) {
         
         parsedData.timeline = JSON.parse(chunkText);
         currentLoadedChunkIndex = targetIndex;
-
-        console.log(`Loaded Chunk ${targetIndex + 1}/${chunks.length} into memory.`);
+        console.log(`Loaded Chunk ${targetIndex + 1}/${chunks.length}`);
     } catch (error) {
         console.error("Error loading chunk:", error);
     } finally {
@@ -615,48 +219,187 @@ async function ensureChunkLoadedForTime(time) {
     }
 }
 
-function clearLines() {
-    while(linesGroup.children.length > 0){ 
-        linesGroup.remove(linesGroup.children[0]); 
-    }
+// ==========================================
+// TOPOLOGY & HARDWARE
+// ==========================================
+function initDashboard() {
+    pausePlayback();
+    nodeMap.clear();
+    rankMap.clear();
+    
+    // Clear old scene
+    const objectsToRemove = [];
+    scene.traverse(child => {
+        if (child.name === "mpiNode" || child.name === "cabinetBox" || child.name === "mpiRank") {
+            objectsToRemove.push(child);
+        }
+    });
+    objectsToRemove.forEach(obj => scene.remove(obj));
+    clearLines();
+
+    const topology = parsedData.topology;
+    const chunks = parsedData.chunks;
+    
+    minTime = (chunks && chunks.length > 0) ? chunks[0].t_start : 0;
+    maxTime = (chunks && chunks.length > 0) ? chunks[chunks.length - 1].t_end : 0;
+
+    const duration = maxTime - minTime;
+    timeMultiplier = (duration > 0) ? duration / 10.0 : 1;
+
+    const slider = document.getElementById("timeSlider");
+    slider.step = "any"; 
+    slider.min = minTime; 
+    slider.max = maxTime;
+    slider.disabled = false;
+    document.getElementById("btn-play").disabled = false;
+
+    buildHardwareTopology(topology);
+    renderSpectrogram();
+    initDynamicSpectrogram();
+    
+    seekToTime(minTime);
 }
 
-// Playback logic remains exactly the same as the 2D version
-function togglePlayback() {
-    if (isPlaying) pausePlayback();
-    else {
-        isPlaying = true;
-        document.getElementById("btn-play").innerHTML = "⏸ Pause";
-        lastFrameTime = performance.now();
-        animationFrameId = requestAnimationFrame(playLoop);
+function buildHardwareTopology(topology) {
+    // Group ranks by Node Hostname
+    const nodesMap = {};
+    topology.forEach(proc => {
+        if (!nodesMap[proc.hostname]) {
+            nodesMap[proc.hostname] = { ranks: [], x: proc.x, y: proc.y, z: proc.z };
+        }
+        nodesMap[proc.hostname].ranks.push(proc.rank);
+    });
+
+    let nodeIndex = 0;
+    const totalNodes = Object.keys(nodesMap).length;
+    let maxY = 0;
+
+    // Build Nodes and Rank Blocks
+    for (const [hostname, data] of Object.entries(nodesMap)) {
+        const nodeGroup = new THREE.Group();
+
+        // If the Python parser used the flat horizontal fallback (y=0, z=0),
+        // we override it to stack vertically so our X/Z lane routing works!
+        let posX = data.x;
+        let posY = data.y;
+        let posZ = data.z;
+
+        if (posY === 0 && posZ === 0) {
+            posX = 0;
+            posY = nodeIndex * 15; // Stack vertically every 15 units
+            posZ = 0;
+        }
+
+        if (posY > maxY) maxY = posY;
+
+        nodeGroup.position.set(posX, posY, posZ);
+
+        // The Hardware Node Shell
+        const shellGeo = new THREE.BoxGeometry(10, 10, 10);
+        const shellMat = new THREE.MeshPhysicalMaterial({
+            color: 0x8b949e, transparent: true, opacity: 0.1, wireframe: true
+        });
+        const shellMesh = new THREE.Mesh(shellGeo, shellMat);
+        shellMesh.name = "mpiNode";
+        nodeGroup.add(shellMesh);
+
+        // Draw individual Process Ranks inside the Node
+        const rankCount = data.ranks.length;
+        const cols = Math.ceil(Math.sqrt(rankCount));
+        const spacing = 8 / cols; 
+        let rIdx = 0;
+
+        data.ranks.forEach(rankId => {
+            const row = Math.floor(rIdx / cols);
+            const col = rIdx % cols;
+            
+            const rankGeo = new THREE.BoxGeometry(spacing*0.8, spacing*0.8, spacing*0.8);
+            const rankMat = new THREE.MeshLambertMaterial({ 
+                color: 0x30363d, 
+                emissive: 0x000000, 
+                emissiveIntensity: 0 
+            });
+            const rankMesh = new THREE.Mesh(rankGeo, rankMat);
+            rankMesh.name = "mpiRank";
+            
+            // Position rank inside the node shell
+            rankMesh.position.set(
+                (col * spacing) - 4 + (spacing/2),
+                (row * spacing) - 4 + (spacing/2),
+                0
+            );
+
+            nodeGroup.add(rankMesh);
+            rankMap.set(rankId, rankMesh); 
+            rIdx++;
+        });
+
+        scene.add(nodeGroup);
+        nodeMap.set(hostname, nodeGroup);
+        nodeIndex++;
     }
+
+    // Center the camera on the middle of the tower, and pull back based on height
+    const centerY = maxY / 2;
+    const distanceToPullBack = Math.max(300, totalNodes * 20);
+
+    camera.position.set(0, centerY, distanceToPullBack);
+    controls.target.set(0, centerY, 0);
+    controls.update(); // Apply the new camera angle
+}
+
+// ==========================================
+// PLAYBACK & RENDERING
+// ==========================================
+async function handleManualSeek(event) {
+    pausePlayback();
+    await seekToTime(parseFloat(event.target.value));
 }
 
 function pausePlayback() {
     isPlaying = false;
-    document.getElementById("btn-play").innerHTML = "▶ Play";
-    if (animationFrameId) cancelAnimationFrame(animationFrameId);
+    const btn = document.getElementById("btn-play");
+    if (btn) btn.innerHTML = "<b>▶ Play</b>";
+    
+    // Stop the animation loop from requesting the next frame
+    if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+    }
 }
 
-let lastFrameTime = 0;
+function togglePlayback() {
+    if (isPlaying) {
+        pausePlayback();
+    } else {
+        isPlaying = true;
+        const btn = document.getElementById("btn-play");
+        if (btn) btn.innerHTML = "<b>|| Pause</b>";
+        
+        lastFrameTime = performance.now();
+        playLoop(performance.now());
+    }
+}
 
-let isProcessingFrame = false;
+async function seekToTime(time) {
+    currentTime = time;
+    document.getElementById("timeSlider").value = currentTime;
+    document.getElementById("currentTimeLabel").textContent = currentTime.toFixed(3);
+    
+    await ensureChunkLoadedForTime(currentTime);
+    renderActiveCommunications();
+    updateDynamicSpectrogram(currentTime);
+}
 
 async function playLoop(timestamp) {
-    if (!isPlaying) return;
-
-    // Prevent overlapping frames if chunk loading takes longer than a standard monitor refresh
-    if (isProcessingFrame) return;
+    if (!isPlaying || isProcessingFrame) return; 
     isProcessingFrame = true;
 
-    const deltaTime = (timestamp - lastFrameTime) / 1000;
+    const deltaTime = (timestamp - lastFrameTime) / 1000; 
     lastFrameTime = timestamp;
-
-    const cappedDelta = Math.min(deltaTime, 0.05);
     
-    const rawSpeedVal = parseFloat(document.getElementById("speedSlider").value);
-    const speed = Math.pow(10, rawSpeedVal);
-
+    const cappedDelta = Math.min(deltaTime, 0.05);
+    const speed = Math.pow(10, parseFloat(document.getElementById("speedSlider").value));
     let nextTime = currentTime + (cappedDelta * timeMultiplier * speed);
 
     if (timestamp - lastDynUpdate > 100) {
@@ -671,13 +414,257 @@ async function playLoop(timestamp) {
         return;
     }
 
-    // Await the seek. The loop will graciously pause here if it has to unzip a chunk
     await seekToTime(nextTime);
-
     isProcessingFrame = false;
-
-    // Check isPlaying again, just in case the user hit pause while the chunk was loading
+    
     if (isPlaying) {
         animationFrameId = requestAnimationFrame(playLoop);
     }
+}
+
+function renderActiveCommunications() {
+    clearLines();
+
+    const windowSize = 0.05 * Math.pow(10, parseFloat(document.getElementById("speedSlider").value));
+    
+    const activeEvents = parsedData.timeline.filter(e => 
+        e.time >= (currentTime - windowSize) && e.time <= currentTime
+    );
+
+    activeEvents.forEach(event => {
+        const cat = MPI_CATEGORIES[event.call] || DEFAULT_CATEGORY;
+
+        // Illumination Logic
+        const senderMesh = rankMap.get(event.sender);
+        const recvMesh = rankMap.get(event.receiver);
+
+        if (event.call === "MPI_WAIT" || event.call === "MPI_WAITALL") {
+            // Force extinguish the glow on wait calls
+            if (senderMesh) senderMesh.material.emissiveIntensity = 0;
+            if (recvMesh) recvMesh.material.emissiveIntensity = 0;
+            return; // Waits don't draw lines
+        } else {
+            // Ignite the ranks
+            if (senderMesh) {
+                senderMesh.material.emissive.setHex(cat.color);
+                senderMesh.material.emissiveIntensity = 1.0;
+            }
+            if (recvMesh) {
+                recvMesh.material.emissive.setHex(cat.color);
+                recvMesh.material.emissiveIntensity = 1.0;
+            }
+        }
+
+        if (event.sender === event.receiver) return;
+
+        // Line Routing Logic
+        let sNode = null, rNode = null;
+        parsedData.topology.forEach(t => {
+            if (t.rank === event.sender) sNode = nodeMap.get(t.hostname);
+            if (t.rank === event.receiver) rNode = nodeMap.get(t.hostname);
+        });
+
+        if (sNode && rNode) {
+            drawCommunicationLine(sNode.position, rNode.position, event.call, event.sender, event.receiver);
+        }
+    });
+}
+
+function drawCommunicationLine(startPos, endPos, callName, sender, receiver) {
+    const cat = MPI_CATEGORIES[callName] || DEFAULT_CATEGORY;
+
+    const midPoint = startPos.clone().lerp(endPos, 0.5);
+    const distance = startPos.distanceTo(endPos);
+    const bowDistance = Math.max(distance * 0.3, 2.0); 
+    const laneOffset = (sender > receiver) ? 2.0 : -2.0;
+
+    // Track Separation Math
+    if (cat.type === "collective") {
+        midPoint.z += bowDistance; 
+    } else if (cat.type === "p2p_nonblock") {
+        midPoint.x -= bowDistance; 
+        midPoint.z += laneOffset; 
+    } else {
+        midPoint.x += bowDistance; 
+        midPoint.z += laneOffset; 
+    }
+
+    const curve = new THREE.QuadraticBezierCurve3(startPos, midPoint, endPos);
+    const points = curve.getPoints(20); 
+    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+
+    const material = new THREE.LineBasicMaterial({
+        color: cat.color,
+        transparent: true,
+        opacity: 0.5,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false 
+    });
+
+    const line = new THREE.Line(geometry, material);
+    line.name = "mpiLine";
+    scene.add(line);
+    activeLines.push(line);
+
+    // Create Junction Points at Node entry/exit
+    createJunctionPoint(points[1], cat.color);
+    createJunctionPoint(points[19], cat.color);
+}
+
+function createJunctionPoint(pos, colorHex) {
+    const geo = new THREE.SphereGeometry(1.5, 8, 8);
+    const mat = new THREE.MeshBasicMaterial({ color: colorHex });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.copy(pos);
+    scene.add(mesh);
+    junctionPoints.push(mesh);
+}
+
+function clearLines() {
+    activeLines.forEach(line => scene.remove(line));
+    activeLines = [];
+    junctionPoints.forEach(pt => scene.remove(pt));
+    junctionPoints = [];
+}
+
+// ==========================================
+// SPECTROGRAM DASHBOARDS
+// ==========================================
+function renderSpectrogram() {
+    const container = document.getElementById("overallStatsContainer");
+    container.innerHTML = "";
+    if (!parsedData || !parsedData.statistics) return;
+    
+    const table = document.createElement('table');
+    table.style.borderCollapse = 'separate';
+    table.style.borderSpacing = '3px';
+    
+    // ... (Headers omitted for brevity, logic identical to previous dynamic block) ...
+    
+    const stats = parsedData.statistics;
+    const calls = Object.keys(stats);
+    if (calls.length === 0) return;
+    
+    let maxVal = 0;
+    calls.forEach(c => Object.values(stats[c]).forEach(v => { if (v > maxVal) maxVal = v; }));
+
+    calls.forEach(call => {
+        const tr = document.createElement('tr');
+        // Label
+        const tdLabel = document.createElement('td');
+        tdLabel.textContent = call.replace('MPI_', '');
+        tdLabel.style.color = '#8b949e';
+        tdLabel.style.textAlign = 'right';
+        tdLabel.style.paddingRight = '8px';
+        tr.appendChild(tdLabel);
+
+        // Blocks
+        Object.values(stats[call]).forEach(val => {
+            const td = document.createElement('td');
+            td.style.border = 'none';
+            td.style.borderRadius = '3px';
+            td.style.height = '20px';
+            td.style.width = '35px';
+            
+            if (val === 0) {
+                td.style.backgroundColor = '#161b22';
+            } else {
+                const intensity = Math.max(0.15, val / maxVal);
+                td.style.backgroundColor = `rgba(88, 166, 255, ${intensity})`; // Blue Overall
+            }
+            tr.appendChild(td);
+        });
+        table.appendChild(tr);
+    });
+    container.appendChild(table);
+}
+
+function initDynamicSpectrogram() {
+    const container = document.getElementById("activeStatsContainer");
+    container.innerHTML = "";
+    dynamicCells = {};
+    if (!parsedData || !parsedData.statistics) return;
+
+    const table = document.createElement('table');
+    table.style.borderCollapse = 'separate';
+    table.style.borderSpacing = '3px';
+    
+    const stats = parsedData.statistics;
+    const calls = Object.keys(stats);
+    if (calls.length === 0) return;
+    const binsTemplate = Object.keys(stats[calls[0]]);
+
+    calls.forEach(call => {
+        const tr = document.createElement('tr');
+        dynamicCells[call] = {}; 
+
+        const tdLabel = document.createElement('td');
+        tdLabel.textContent = call.replace('MPI_', '');
+        tdLabel.style.color = '#8b949e';
+        tdLabel.style.textAlign = 'right';
+        tdLabel.style.paddingRight = '8px';
+        tr.appendChild(tdLabel);
+
+        binsTemplate.forEach(bin => {
+            const td = document.createElement('td');
+            td.style.border = 'none';
+            td.style.borderRadius = '3px';
+            td.style.height = '20px';
+            td.style.width = '35px';
+            td.style.backgroundColor = '#161b22';
+            td.style.transition = 'background-color 0.15s ease-out'; 
+            
+            dynamicCells[call][bin] = td;
+            tr.appendChild(td);
+        });
+        table.appendChild(tr);
+    });
+    container.appendChild(table);
+}
+
+function updateDynamicSpectrogram(targetTime) {
+    if (!parsedData || !dynamicCells) return;
+    
+    // Reset Counts
+    const stats = parsedData.statistics;
+    const calls = Object.keys(stats);
+    const binsTemplate = Object.keys(stats[calls[0]]);
+    let currentCounts = {};
+    calls.forEach(c => {
+        currentCounts[c] = {};
+        binsTemplate.forEach(b => currentCounts[c][b] = 0);
+    });
+
+    // Tally up to targetTime using only the currently loaded chunk
+    for (let i = 0; i < parsedData.timeline.length; i++) {
+        const event = parsedData.timeline[i];
+        if (event.time > targetTime) break;
+        const call = event.call;
+        if (currentCounts[call] !== undefined) {
+            const b = event.bytes || 0;
+            if (b < 128) currentCounts[call]["< 128B"]++;
+            else if (b < 1024) currentCounts[call]["128B - 1KB"]++;
+            else if (b < 65536) currentCounts[call]["1KB - 64KB"]++;
+            else if (b < 1048576) currentCounts[call]["64KB - 1MB"]++;
+            else if (b < 16777216) currentCounts[call]["1MB - 16MB"]++;
+            else currentCounts[call]["> 16MB"]++;
+        }
+    }
+
+    let globalMax = 0;
+    calls.forEach(c => binsTemplate.forEach(b => { if (stats[c][b] > globalMax) globalMax = stats[c][b]; }));
+
+    // Update Floating Blocks
+    calls.forEach(call => {
+        binsTemplate.forEach(bin => {
+            const count = currentCounts[call][bin];
+            const td = dynamicCells[call][bin];
+            if (count === 0) {
+                td.style.backgroundColor = '#161b22';
+            } else {
+                const intensity = Math.max(0.15, count / globalMax);
+                td.style.backgroundColor = `rgba(46, 160, 67, ${intensity})`; // Green Active
+            }
+        });
+    });
 }
