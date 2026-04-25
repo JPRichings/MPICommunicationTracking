@@ -50,7 +50,7 @@ def print_summary_table(stats):
 
     bins = ["< 128B", "128B - 1KB", "1KB - 64KB", "64KB - 1MB", "1MB - 16MB", "> 16MB"]
     
-    header = f" {'MPI Call':<13} | " + " | ".join([f"{b:<10}" for b in bins]) + " | {'Total':<8}"
+    header = f" {'MPI Call':<13} | " + " | ".join([f"{b:<10}" for b in bins]) + " | {Total}"
     print(header)
     print("-" * len(header))
     
