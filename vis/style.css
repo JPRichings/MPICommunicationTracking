@@ -59,6 +59,7 @@ body {
     overflow-y: auto;      /* Enable whole-widget vertical scrolling */
     overflow-x: hidden;    /* Kill the horizontal scrollbars */
     height: 100vh;         /* Ensure the sidebar takes exactly the height of the screen */
+    box-sizing: border-box
 }
 
 .sidebar-header {

@@ -44,8 +44,13 @@ const sharedArrowGeo = new THREE.ConeGeometry(0.25, 0.8, 8);
 sharedArrowGeo.translate(0, -0.4, 0);
 sharedArrowGeo.rotateX(Math.PI / 2);
 
-// 3D HOVER TOOLTIPS
+// 3d hover tooltips
 let tooltipEl;
+
+// Recording functionality
+let uiMediaRecorder = null;
+let uiRecordedChunks = [];
+let uiStream = null;
 
 // ==========================================
 // CONFIGURATION & CATEGORIES
@@ -102,6 +107,15 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     document.getElementById("btn-play").addEventListener("click", togglePlayback);
+   
+    document.getElementById("btn-rec-ui-start")?.addEventListener("click", () => {
+      startUIRecording({ fps: 60, bitsPerSecond: 8_000_000 }).catch(err => {
+      console.error(err);
+        alert("Failed to start UI recording. See console for details.");
+      });
+    });
+
+    document.getElementById("btn-rec-ui-stop")?.addEventListener("click", stopUIRecording);
 });
 
 window.addEventListener("resize", () => {
@@ -1139,6 +1153,104 @@ function renderMetadata() {
         </div>
     `;
 }
+
+// ==========================================
+// RECORDING
+// ==========================================
+function pickSupportedMimeType() {
+  const candidates = [
+    "video/webm;codecs=vp9",
+    "video/webm;codecs=vp8",
+    "video/webm"
+  ];
+  return candidates.find(t => window.MediaRecorder?.isTypeSupported?.(t)) || "";
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function getTimestampSlug() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+}
+
+async function startUIRecording({ fps = 60, bitsPerSecond = 8_000_000 } = {}) {
+  if (uiMediaRecorder) return;
+
+  if (!navigator.mediaDevices?.getDisplayMedia) {
+    alert("UI recording not supported: navigator.mediaDevices.getDisplayMedia is unavailable.");
+    return;
+  }
+
+  // NOTE: Browser will show a permission picker.
+  // On Chromium you can typically pick "This tab" for best results.
+  uiStream = await navigator.mediaDevices.getDisplayMedia({
+    video: {
+      frameRate: fps,
+      width: { ideal: 1920 },
+      height: { ideal: 1080 }
+    },
+    audio: false
+  });
+
+  uiRecordedChunks = [];
+  const mimeType = pickSupportedMimeType();
+  const options = { bitsPerSecond };
+  if (mimeType) options.mimeType = mimeType;
+
+  uiMediaRecorder = new MediaRecorder(uiStream, options);
+
+  uiMediaRecorder.ondataavailable = (e) => {
+    if (e.data && e.data.size > 0) uiRecordedChunks.push(e.data);
+  };
+
+  uiMediaRecorder.onstop = () => {
+    const blob = new Blob(uiRecordedChunks, { type: uiMediaRecorder.mimeType || "video/webm" });
+    downloadBlob(blob, `mpi-vis-ui-${getTimestampSlug()}-t${currentTime.toFixed(3)}.webm`);
+
+    // Cleanup
+    uiRecordedChunks = [];
+    try { uiStream?.getTracks()?.forEach(t => t.stop()); } catch {}
+    uiStream = null;
+    uiMediaRecorder = null;
+
+    const status = document.getElementById("recUIStatus");
+    if (status) status.textContent = "";
+    const startBtn = document.getElementById("btn-rec-ui-start");
+    const stopBtn = document.getElementById("btn-rec-ui-stop");
+    if (startBtn) startBtn.disabled = false;
+    if (stopBtn) stopBtn.disabled = true;
+  };
+
+  // If the user stops sharing from the browser UI, stop cleanly:
+  uiStream.getVideoTracks()[0].addEventListener("ended", () => {
+    if (uiMediaRecorder) uiMediaRecorder.stop();
+  });
+
+  uiMediaRecorder.start(250);
+
+  const status = document.getElementById("recUIStatus");
+  if (status) status.textContent = "Recording UI…";
+  const startBtn = document.getElementById("btn-rec-ui-start");
+  const stopBtn = document.getElementById("btn-rec-ui-stop");
+  if (startBtn) startBtn.disabled = true;
+  if (stopBtn) stopBtn.disabled = false;
+}
+
+function stopUIRecording() {
+  if (!uiMediaRecorder) return;
+  uiMediaRecorder.stop();
+}
+
 
 
 // ======
