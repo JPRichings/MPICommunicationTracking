@@ -946,7 +946,7 @@ function renderActiveCommunications() {
                     startWorld.z += 5.5;
                     endWorld.z += 5.5;
 
-                    drawCommunicationLine(startWorld, endWorld, event.call, event.sender, event.receiver);
+                    drawInterNodeLine(startWorld, endWorld, event.call, event.sender, event.receiver);
                 } else {
                     const sRankMesh = rankMap.get(event.sender);
                     const rRankMesh = rankMap.get(event.receiver);
@@ -964,7 +964,7 @@ function renderActiveCommunications() {
                         startWorld.z += (sDepth / 2) + 0.5;
                         endWorld.z += (rDepth / 2) + 0.5;
 
-                        drawCommunicationLine(startWorld, endWorld, event.call, event.sender, event.receiver);
+                        drawInterNodeLine(startWorld, endWorld, event.call, event.sender, event.receiver);
                     }
                 }
             }
