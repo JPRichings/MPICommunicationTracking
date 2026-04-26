@@ -39,11 +39,14 @@ const rankToNodeGroup = new Map();
 const sharedMaterials = {};
 const sharedSphereGeo = new THREE.SphereGeometry(0.2, 8, 8);
 
+// 3D HOVER TOOLTIPS
+let tooltipEl;
+
 // ==========================================
 // CONFIGURATION & CATEGORIES
 // ==========================================
 const MPI_CATEGORIES = {
-    // 1. P2P Blocking (Blue)
+    //P2P Blocking (Blue)
     "MPI_SEND": { type: "p2p_block", color: 0x58a6ff },
     "MPI_RECV": { type: "p2p_block", color: 0x58a6ff },
     "MPI_BSEND": { type: "p2p_block", color: 0x58a6ff },
@@ -51,7 +54,7 @@ const MPI_CATEGORIES = {
     "MPI_RSEND": { type: "p2p_block", color: 0x58a6ff },
     "MPI_SENDRECV": { type: "p2p_block", color: 0x58a6ff },
 
-    // 2. P2P Non-Blocking (Teal)
+    // P2P Non-Blocking (Teal)
     "MPI_ISEND": { type: "p2p_nonblock", color: 0x3fb950 },
     "MPI_IRECV": { type: "p2p_nonblock", color: 0x3fb950 },
     "MPI_IBSEND": { type: "p2p_nonblock", color: 0x3fb950 },
@@ -62,7 +65,7 @@ const MPI_CATEGORIES = {
     "MPI_WAIT": { type: "state", color: 0x238636 },
     "MPI_WAITALL": { type: "state", color: 0x238636 },
 
-    // 3. Collectives (Orange)
+    // Collectives (Orange)
     "MPI_BCAST": { type: "collective", color: 0xd29922 },
     "MPI_REDUCE": { type: "collective", color: 0xd29922 },
     "MPI_ALLREDUCE": { type: "collective", color: 0xd29922 },
@@ -127,17 +130,14 @@ function initThreeJS() {
     controls.dampingFactor = 0.05;
 
     controls.listenToKeyEvents(window);
-    controls.keyPanSpeed = 20.0; // Adjust how fast the camera moves
-    // Map panning to W, A, S, D
-    //controls.keys = {
-    //    LEFT: 'KeyA',
-    //    UP: 'KeyW',
-    //    RIGHT: 'KeyD',
-    //    BOTTOM: 'KeyS'
-    //}; 
+    controls.keyPanSpeed = 20.0; 
 
     // Listen for clicks on the 3D canvas
     renderer.domElement.addEventListener('click', onCanvasClick, false);
+    
+    // Setup and listen for 3D hover tooltips
+    initTooltip();
+    renderer.domElement.addEventListener('mousemove', onMouseMove, false);
     
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 
@@ -145,10 +145,10 @@ function initThreeJS() {
     grid.position.y = -10;
     scene.add(grid);
 
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8); // Was 0.4
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8); 
     scene.add(ambientLight);
     
-    const dirLight = new THREE.DirectionalLight(0xffffff, 1.0); // Was 0.6
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.0); 
     dirLight.position.set(200, 500, 300);
     scene.add(dirLight);
 
@@ -156,7 +156,6 @@ function initThreeJS() {
 
     animateThreeJS();
 }
-
 
 function animateThreeJS() {
     requestAnimationFrame(animateThreeJS);
@@ -237,7 +236,6 @@ async function handleFileUpload(event) {
         console.error("Failed to unpack:", error);
     }
 }
-
 
 async function ensureChunkLoadedForTime(time) {
     if (!parsedData?.chunks || !uploadedFilePointer) return;
@@ -323,7 +321,6 @@ async function ensureChunkLoadedForTime(time) {
     }
 }
 
-
 // ==========================================
 // TOPOLOGY & HARDWARE
 // ==========================================
@@ -384,7 +381,8 @@ function initDashboard() {
     document.getElementById("btn-play").disabled = false;
 
     buildHardwareTopology(topology);
-    buildRankIndex(parsedData.topology)
+    buildRankIndex(parsedData.topology);
+    renderMetadata();
     renderSpectrogram();
     initDynamicSpectrogram();
    
@@ -404,7 +402,6 @@ function buildRankIndex(topology) {
     }
   });
 }
-
 
 function buildHardwareTopology(topology) {
     const nodesMap = {};
@@ -463,7 +460,7 @@ function buildHardwareTopology(topology) {
         }
     }
 
-    // POPULATE: Add active MPI ranks and their physical locations
+    // Add active MPI ranks and their physical locations
     topology.forEach(proc => {
         const host = proc.hostname || "unknown";
         if (!nodesMap[host]) {
@@ -505,7 +502,7 @@ function buildHardwareTopology(topology) {
     // Caches for dynamically sized geometries (since core sizes depend on hardware specs)
     const geometryCache = {};
 
-    // BUILD THE 3D SCENE
+    // Build the scene
     Object.keys(nodesMap).forEach(hostname => {
         const data = nodesMap[hostname];
         const nodeGroup = new THREE.Group();
@@ -524,12 +521,11 @@ function buildHardwareTopology(topology) {
         if (posY > maxY) maxY = posY;
         nodeGroup.position.set(posX, posY, posZ);
 
-        // --- OUTER NODE SHELL ---
         // Check if the node is actively used in the trace
         const isActiveNode = data.ranks.length > 0;
         const currentNodeMat = isActiveNode ? sharedActiveNodeMat : sharedIdleNodeMat;
 
-        // Apply the correct color based on activity
+        // Apply the correct colour based on activity
         const shellMesh = new THREE.LineSegments(sharedNodeEdges, currentNodeMat);
         shellMesh.name = "mpiNode";
         nodeGroup.add(shellMesh);
@@ -538,9 +534,7 @@ function buildHardwareTopology(topology) {
         fillMesh.name = "mpiNodeFill";
         nodeGroup.add(fillMesh);
 
-        // --- CHIP AND CORE LAYOUT (Strict Hardware Packing) ---
-        // Lock the grid size strictly to the hardware blueprint topology.
-        // We no longer dynamically expand based on messy OS logical core IDs.
+        // Chip and core layout (strict hardware packing)
         const numChips = data.cpus;
         const numCores = data.coresPerCpu;
 
@@ -556,17 +550,12 @@ function buildHardwareTopology(topology) {
         const coreCols = Math.ceil(Math.sqrt(numCores));
         const coreRows = Math.ceil(numCores / coreCols);
         
-        // Reduce padding so cores pack tightly together
         const maxCoreSpacingX = (chipSpacingX * 0.90) / coreCols; 
         const maxCoreSpacingY = (chipSpacingY * 0.90) / coreRows;
         
-        // Lock the spacing to form a perfect square grid
         const coreSpacing = Math.min(maxCoreSpacingX, maxCoreSpacingY);
-        
-        // Make the physical core block take up 90% of its available space
         const coreSize = coreSpacing * 0.90; 
 
-        // Find the absolute width/height of the new perfectly square grid
         const actualGridWidth = coreCols * coreSpacing;
         const actualGridHeight = coreRows * coreSpacing;
 
@@ -600,7 +589,6 @@ function buildHardwareTopology(topology) {
                 const coreOffsetX = startX + (iCol * coreSpacing);
                 const coreOffsetY = startY + (iRow * coreSpacing);
 
-                // Calculate the true physical index (e.g., slot 0 to 47) and just grab the next rank
                 const globalSlotIndex = (c * numCores) + i;
                 const activeRank = sortedRanks[globalSlotIndex];
 
@@ -608,13 +596,22 @@ function buildHardwareTopology(topology) {
                     const uniqueRankMat = sharedActiveRankMat.clone();
                     const rankMesh = new THREE.Mesh(geometryCache[cacheKey].core, uniqueRankMat);
                     rankMesh.name = "mpiRank";
+                    
+                    // Attach the exact hardware payload to the 3D object for the tooltip
+                    rankMesh.userData = { 
+                        rank: activeRank.id, 
+                        host: hostname, 
+                        chip: c, 
+                        core: i 
+                    };
+
                     rankMesh.position.set(coreOffsetX, coreOffsetY, 5.2); 
                     nodeGroup.add(rankMesh);
                     rankMap.set(activeRank.id, rankMesh); 
                 } else {
                     const idleMesh = new THREE.Mesh(geometryCache[cacheKey].core, sharedIdleCoreMat);
                     idleMesh.name = "idleCore";
-                    idleMesh.position.set(coreOffsetX, coreOffsetY, 4.5); 
+                    idleMesh.position.set(coreOffsetX, coreOffsetY, 5.2); 
                     nodeGroup.add(idleMesh);
                 }
             }
@@ -643,47 +640,99 @@ function buildHardwareTopology(topology) {
     controls.update(); 
 }
 
-// ===============
-// CAMERA MOVEMENT
-// ===============
-function onCanvasClick(event) {
-    // Calculate normalized mouse coordinates (-1 to +1) relative to the canvas
+// ==========================================
+// 3D HOVER TOOLTIPS
+// ==========================================
+function initTooltip() {
+    if (document.getElementById("mpiTooltip")) return;
+    
+    tooltipEl = document.createElement('div');
+    tooltipEl.id = "mpiTooltip";
+    tooltipEl.style.position = 'absolute';
+    tooltipEl.style.display = 'none';
+    tooltipEl.style.pointerEvents = 'none'; // Critical so it doesn't block the mouse
+    tooltipEl.style.backgroundColor = 'rgba(22, 27, 34, 0.95)';
+    tooltipEl.style.border = '1px solid #58a6ff';
+    tooltipEl.style.borderRadius = '6px';
+    tooltipEl.style.padding = '10px 15px';
+    tooltipEl.style.color = '#c9d1d9';
+    tooltipEl.style.fontFamily = "'Fira Code', monospace";
+    tooltipEl.style.fontSize = '0.85rem';
+    tooltipEl.style.zIndex = '2000';
+    tooltipEl.style.boxShadow = '0 4px 12px rgba(0,0,0,0.8)';
+    document.body.appendChild(tooltipEl);
+}
+
+function onMouseMove(event) {
+    if (!tooltipEl) return;
+
     const rect = renderer.domElement.getBoundingClientRect();
     mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
-    // Shoot the raycaster
     raycaster.setFromCamera(mouse, camera);
+    const intersects = raycaster.intersectObjects(scene.children, true);
 
-    // Find intersections with our nodes
+    let hoveredRank = null;
+    for (let i = 0; i < intersects.length; i++) {
+        if (intersects[i].object.name === "mpiRank") {
+            hoveredRank = intersects[i].object;
+            break;
+        }
+    }
+
+    if (hoveredRank) {
+        const data = hoveredRank.userData;
+        tooltipEl.innerHTML = `
+            <strong style="color: #58a6ff; font-size: 1.0rem;">Rank ${data.rank}</strong><br/>
+            <hr style="border: 0; border-top: 1px solid #30363d; margin: 6px 0;">
+            <span style="color: #8b949e;">Host:</span> ${data.host}<br/>
+            <span style="color: #8b949e;">Chip:</span> ${data.chip} | <span style="color: #8b949e;">Core:</span> ${data.core}
+        `;
+        tooltipEl.style.display = 'block';
+        tooltipEl.style.left = (event.clientX + 15) + 'px'; 
+        tooltipEl.style.top = (event.clientY + 15) + 'px';
+        document.body.style.cursor = 'pointer';
+    } else {
+        tooltipEl.style.display = 'none';
+        document.body.style.cursor = 'default';
+    }
+}
+
+// ===============
+// CAMERA MOVEMENT
+// ===============
+function onCanvasClick(event) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+    raycaster.setFromCamera(mouse, camera);
     const intersects = raycaster.intersectObjects(scene.children, true);
 
     for (let i = 0; i < intersects.length; i++) {
         const object = intersects[i].object;
         
-        // If we clicked a Node Shell or a Rank Box
         if (object.name === "mpiNode" || object.name === "mpiRank") {
             const targetPosition = new THREE.Vector3();
             object.getWorldPosition(targetPosition);
             
             flyCameraTo(targetPosition);
-            break; // Stop after finding the first hit
+            break; 
         }
     }
 }
 
 function flyCameraTo(targetPos) {
-    // Suspend user controls during the cinematic flight
     controls.enabled = false;
 
-    // Determine where the camera should end up (e.g., slightly up and pulled back)
     const cameraOffset = new THREE.Vector3(0, 15, 40);
     const finalCameraPos = targetPos.clone().add(cameraOffset);
 
     const startTarget = controls.target.clone();
     const startCamera = camera.position.clone();
     
-    const duration = 800; // 800 milliseconds for the flight
+    const duration = 800; 
     const startTime = performance.now();
 
     function animateTransition(time) {
@@ -691,17 +740,14 @@ function flyCameraTo(targetPos) {
         let t = elapsed / duration;
         if (t > 1) t = 1;
 
-        // Apply a smooth "Ease Out" curve
         const easeT = 1 - Math.pow(1 - t, 3);
 
-        // Interpolate the camera position and where it is looking
         camera.position.lerpVectors(startCamera, finalCameraPos, easeT);
         controls.target.lerpVectors(startTarget, targetPos, easeT);
         
         if (t < 1) {
             requestAnimationFrame(animateTransition);
         } else {
-            // Re-enable controls once we arrive
             controls.enabled = true;
             controls.update();
         }
@@ -724,7 +770,6 @@ function pausePlayback() {
     const btn = document.getElementById("btn-play");
     if (btn) btn.innerHTML = "<b>▶ Play</b>";
     
-    // Stop the animation loop from requesting the next frame
     if (animationFrameId) {
         cancelAnimationFrame(animationFrameId);
         animationFrameId = null;
@@ -756,10 +801,8 @@ async function seekToTime(time, isPlayingLoop = false) {
       return [];
     }   
  
-    // Grab the active events returned by our new Binary Search
     const activeEvents = renderActiveCommunications();
     
-    // Only update the heavy dashboard here if the user is manually scrubbing the slider!
     if (!isPlayingLoop) {
         updateDynamicSpectrogram(activeEvents);
     }
@@ -785,10 +828,8 @@ async function playLoop(timestamp) {
         return;
     }
 
-    // Pass 'true' so seekToTime doesn't trigger the dashboard
     const activeEvents = await seekToTime(nextTime, true);
 
-    // Safely throttle the dashboard updates to run exactly every 100ms
     if (timestamp - lastDynUpdate > 100) {
         updateDynamicSpectrogram(activeEvents);
         lastDynUpdate = timestamp;
@@ -852,10 +893,7 @@ function renderActiveCommunications() {
         const recvMesh = rankMap.get(event.receiver);
 
         if (event.call === "MPI_WAIT" || event.call === "MPI_WAITALL") {
-            // Force extinguish the glow on wait calls
-            if (senderMesh) senderMesh.material.emissiveIntensity = 0;
-            if (recvMesh) recvMesh.material.emissiveIntensity = 0;
-            return; // Waits don't draw lines
+            return; 
         } else {
             // Ignite the ranks
             if (senderMesh) {
@@ -885,19 +923,19 @@ function renderActiveCommunications() {
                     const startWorld = new THREE.Vector3();
                     const endWorld = new THREE.Vector3();
                     
-                    // Extract the absolute global 3D coordinates of the specific cores
                     sRankMesh.getWorldPosition(startWorld);
                     rRankMesh.getWorldPosition(endWorld);
 
-                    drawIntraNodeLine(startWorld, endWorld, event.call);
+                    // Pass event.time to generate an animated packet
+                    drawIntraNodeLine(startWorld, endWorld, event.call, event.time);
                 }
             } else {
                 // They are on different nodes.
                 if (cat.type === "collective") {
-                    // Collectives stay node-to-node to avoid massive visual clutter
-                    drawCommunicationLine(sNode.position, rNode.position, event.call, event.sender, event.receiver);
+                    // Collectives stay node-to-node
+                    drawCommunicationLine(sNode.position, rNode.position, event.call, event.sender, event.receiver, event.time);
                 } else {
-                    // Point-to-Point routes directly core-to-core across the network!
+                    // Point-to-Point routes directly core-to-core
                     const sRankMesh = rankMap.get(event.sender);
                     const rRankMesh = rankMap.get(event.receiver);
 
@@ -908,7 +946,8 @@ function renderActiveCommunications() {
                         sRankMesh.getWorldPosition(startWorld);
                         rRankMesh.getWorldPosition(endWorld);
 
-                        drawCommunicationLine(startWorld, endWorld, event.call, event.sender, event.receiver);
+                        // Pass event.time to generate an animated packet
+                        drawCommunicationLine(startWorld, endWorld, event.call, event.sender, event.receiver, event.time);
                     }
                 }
             }
@@ -924,26 +963,28 @@ function drawIntraNodeLine(startPos, endPos, callName) {
     const midPoint = startPos.clone().lerp(endPos, 0.5);
     const distance = startPos.distanceTo(endPos);
 
-    // Bow straight out towards the user so the line doesn't cut through the cores
-    const bowDistance = Math.max(distance * 0.4, 1.0); 
+    const bowDistance = Math.max(distance * 0.6, 3.0); 
     midPoint.z += bowDistance;
 
     const curve = new THREE.QuadraticBezierCurve3(startPos, midPoint, endPos);
     
-    // We only need 10 points for these tiny lines (saves visualisation memory)
-    const points = curve.getPoints(10); 
-    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+    // Parameters: path, tubularSegments, radius, radialSegments, closed
+    // We use low segments (12 and 6) to keep memory optimised
+    const geometry = new THREE.TubeGeometry(curve, 12, 0.15, 6, false);
 
-    const material = sharedMaterials[callName + "_line"] || sharedMaterials["default_line"];
+    // Use the solid, fully opaque junction material so it pops
+    const material = sharedMaterials[callName + "_junction"] || sharedMaterials["default_junction"];
 
-    const line = new THREE.Line(geometry, material);
-    line.name = "mpiLine";
-    scene.add(line);
-    activeLines.push(line);
+    // Because it's a TubeGeometry, it's a mesh not a line 
+    const tube = new THREE.Mesh(geometry, material);
+    tube.name = "mpiLine";
+    scene.add(tube);
+    activeLines.push(tube);
 
-    // Add tiny junction points at the core boundaries
-    createJunctionPoint(points[1], callName);
-    createJunctionPoint(points[9], callName);
+    // We add the junction spheres to cap the ends cleanly into the silicon
+    const points = curve.getPoints(10);
+    createJunctionPoint(points[0], callName);
+    createJunctionPoint(points[points.length - 1], callName);
 }
 
 function drawCommunicationLine(startPos, endPos, callName, sender, receiver) {
@@ -976,9 +1017,8 @@ function drawCommunicationLine(startPos, endPos, callName, sender, receiver) {
     scene.add(line);
     activeLines.push(line);
 
-    // Pass the callName instead of colorHex to the junction function
-    createJunctionPoint(points[1], callName);
-    createJunctionPoint(points[19], callName);
+    createJunctionPoint(points[0], callName);
+    createJunctionPoint(points[points.length - 1], callName);
 }
 
 function createJunctionPoint(pos, callName) {
@@ -1006,6 +1046,51 @@ function clearLines() {
     });
     junctionPoints = [];
 }
+
+function renderMetadata() {
+    let container = document.getElementById("metadataContainer");
+    
+    // Dynamic injection fallback if the user hasn't added the div to their HTML yet
+    if (!container) {
+        const timeSlider = document.getElementById("timeSlider");
+        if (timeSlider) {
+            const timelinePanel = timeSlider.parentElement; 
+            container = document.createElement("div");
+            container.id = "metadataContainer";
+            container.style.marginBottom = "20px";
+            container.style.padding = "15px";
+            container.style.backgroundColor = "rgba(22, 27, 34, 0.5)";
+            container.style.border = "1px solid #30363d";
+            container.style.borderRadius = "8px";
+            timelinePanel.parentNode.insertBefore(container, timelinePanel);
+        } else {
+            return; // Safety exit if UI elements aren't found
+        }
+    }
+    
+    container.innerHTML = "";
+    
+    // Extract metadata from the parsed .mpix file header
+    const meta = parsedData.metadata || parsedData.info || {};
+    const programName = meta.program || meta.executable || meta.name || "Unknown Program";
+    const runDate = meta.date || meta.timestamp || "Unknown Date";
+    
+    // Calculate scale from topology
+    const totalRanks = parsedData.topology ? parsedData.topology.length : 0;
+    const totalNodes = Object.keys(parsedData.hardware_blueprint ? parsedData.hardware_blueprint : {}).length;
+    
+    container.innerHTML = `
+        <div style="font-size: 0.75rem; color: #8b949e; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px;">
+            Run Metadata
+        </div>
+        <div style="color: #c9d1d9; font-family: 'Fira Code', monospace; font-size: 0.85rem; line-height: 1.6;">
+            <div><span style="color: #58a6ff;">Program:</span> ${programName}</div>
+            <div><span style="color: #58a6ff;">Date:</span> ${runDate}</div>
+            <div><span style="color: #58a6ff;">Scale:</span> ${totalRanks} Ranks / ${totalNodes} Nodes</div>
+        </div>
+    `;
+}
+
 
 // ======
 // LEGEND
@@ -1125,7 +1210,7 @@ function renderSpectrogram() {
             td.style.height = '20px';
             td.style.width = '35px';
             
-            // --- THE FIX: Add the native browser tooltip ---
+            // Add the native browser tooltip
             td.title = `${call} (${bin}): ${val} total messages`;
             
             if (val === 0) {
@@ -1176,7 +1261,7 @@ function initDynamicSpectrogram() {
             td.style.backgroundColor = '#161b22';
             td.style.transition = 'background-color 0.15s ease-out'; 
             
-            // --- THE FIX: Add the initial blank tooltip ---
+            // Add the initial blank tooltip
             td.title = `${call} (${bin}): 0 active messages`;
             
             dynamicCells[call][bin] = td;
@@ -1226,7 +1311,7 @@ function updateDynamicSpectrogram(activeEvents) {
             const count = currentCounts[call][bin];
             const td = dynamicCells[call][bin];
             
-            // --- THE FIX: Dynamically update the tooltip with the live count ---
+            // Dynamically update the tooltip with the live count
             td.title = `${call} (${bin}): ${count} active messages`;
             
             if (count === 0) {
