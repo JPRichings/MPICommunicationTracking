@@ -159,3 +159,6 @@ The tool currently tracks the following operations:
 * **Point-to-Point:** `MPI_Send`, `MPI_Recv`, `MPI_Isend`, `MPI_Irecv`, `MPI_Bsend`, `MPI_Ssend`, `MPI_Rsend`, `MPI_Ibsend`, `MPI_Issend`, `MPI_Irsend`, `MPI_Sendrecv`
 * **Collectives:** `MPI_Bcast`, `MPI_Reduce`, `MPI_Allreduce`, `MPI_Gather`, `MPI_Scatter`, `MPI_Allgather`
 * **Synchronization:** `MPI_Wait`, `MPI_Waitall`, `MPI_Barrier`
+
+## License
+This project is licensed under the Apache 2.0 License - see the [LICENSE](LICENSE) file for details.
