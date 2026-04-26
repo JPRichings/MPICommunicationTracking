@@ -71,6 +71,8 @@ make
 ```
 This will generate `libmpi_comm_tracker.so` inside the `build/src/` directory.
 
+---
+
 ### 2. Run Your MPI Application
 Run your standard MPI application, but use the `LD_PRELOAD` environment variable to inject the tracking library before the system MPI library loads. 
 
