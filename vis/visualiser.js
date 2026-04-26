@@ -96,6 +96,16 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("btn-play").addEventListener("click", togglePlayback);
 });
 
+window.addEventListener("resize", () => {
+  const container = document.getElementById("visCanvas");
+  if (!container) return;
+
+  camera.aspect = container.clientWidth / container.clientHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(container.clientWidth, container.clientHeight);
+});
+
+
 function initThreeJS() {
     const container = document.getElementById("visCanvas");
     scene = new THREE.Scene();
@@ -281,12 +291,7 @@ async function ensureChunkLoadedForTime(time) {
 
                 const timeline = JSON.parse(chunkText);
 
-                if (Array.isArray(timeline) && timeline.length > 1) {
-                    // Only sort if it looks unsorted (cheap check)
-                    if (timeline[0].time > timeline[timeline.length - 1].time) {
-                        timeline.sort((a, b) => a.time - b.time);
-                    }
-                }
+                if (Array.isArray(timeline) && timeline.length > 1) timeline.sort((a,b) => a.time - b.time);
 
                 parsedData.timeline = timeline;
                 currentLoadedChunkIndex = targetIndex;
@@ -359,28 +364,6 @@ function initDashboard() {
     clearTopologyScene();
     rankToNodeGroup.clear();   
  
-    // Clear old scene
-    const objectsToRemove = [];
-    scene.traverse(child => {
-        if (child.name === "mpiNode" || child.name === "mpiNodeFill" || child.name === "cabinetBox" || child.name === "mpiRank") {
-            objectsToRemove.push(child);
-        }
-    });
-    objectsToRemove.forEach(obj => {
-        // Free the GPU memory for the nodes and ranks
-        if (obj.geometry) obj.geometry.dispose();
-        if (obj.material) {
-            // Materials can sometimes be arrays
-            if (Array.isArray(obj.material)) {
-                obj.material.forEach(m => m.dispose());
-            } else {
-                obj.material.dispose();
-            }
-        }
-        scene.remove(obj);
-    });
-    clearLines();
-
     const topology = parsedData.topology;
     const chunks = parsedData.chunks;
     
@@ -500,7 +483,7 @@ function buildHardwareTopology(topology) {
     const sharedNodeGeo = new THREE.BoxGeometry(10, 10, 10);
     const sharedNodeEdges = new THREE.EdgesGeometry(sharedNodeGeo);
     
-    // 1. Split Node Materials (Active = Bright Blue, Idle = Ghostly Gray)
+    // Split Node Materials (Active = Bright Blue, Idle = Ghostly Gray)
     const sharedActiveNodeMat = new THREE.LineBasicMaterial({ color: 0x58a6ff, transparent: true, opacity: 0.8 }); 
     const sharedIdleNodeMat = new THREE.LineBasicMaterial({ color: 0x4b5563, transparent: true, opacity: 0.2 });   
 
@@ -511,11 +494,9 @@ function buildHardwareTopology(topology) {
     
     const sharedActiveRankMat = new THREE.MeshLambertMaterial({ color: 0x4b5563, emissive: 0x58a6ff, emissiveIntensity: 0.15 });
     
-    // 2. Make Idle Cores a solid, brighter gray (wireframes vanish on high-res screens)
+    // Make Idle Cores a solid, brighter gray (wireframes vanish on high-res screens)
     const sharedIdleCoreMat = new THREE.MeshBasicMaterial({ color: 0x6e7681, transparent: true, opacity: 0.6 });
     
-    const sharedCabinetMat = new THREE.LineBasicMaterial({ color: 0x8b949e, transparent: true, opacity: 0.5 });
-
     // Caches for dynamically sized geometries (since core sizes depend on hardware specs)
     const geometryCache = {};
 
