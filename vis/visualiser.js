@@ -8,7 +8,6 @@ let parsedData = null;
 let uploadedFilePointer = null;
 let currentLoadedChunkIndex = -1;
 let headerLengthOffset = 0;
-let isChunkLoading = false; // Mutex Lock
 let chunkLoadPromise = null;        // Promise for the currently in-flight chunk load
 let chunkLoadIndexInFlight = -1;    // Which chunk index that promise is loading
 
@@ -279,7 +278,6 @@ async function ensureChunkLoadedForTime(time) {
 
                 const timeline = JSON.parse(chunkText);
 
-                // Optional safety: if your writer *guarantees* sorted-by-time, you can remove this.
                 if (Array.isArray(timeline) && timeline.length > 1) {
                     // Only sort if it looks unsorted (cheap check)
                     if (timeline[0].time > timeline[timeline.length - 1].time) {
@@ -293,8 +291,8 @@ async function ensureChunkLoadedForTime(time) {
                 console.log(`Loaded Chunk ${targetIndex + 1}/${chunks.length}`);
             } catch (error) {
                 console.error("Error loading chunk:", error);
-                // You can choose to clear timeline on failure:
-                // parsedData.timeline = [];
+                 parsedData.timeline = [];
+                throw error; 
             } finally {
                 if (overlay) overlay.style.display = "none";
             }
@@ -723,8 +721,13 @@ async function seekToTime(time, isPlayingLoop = false) {
     document.getElementById("timeSlider").value = currentTime;
     document.getElementById("currentTimeLabel").textContent = currentTime.toFixed(3);
     
-    await ensureChunkLoadedForTime(currentTime);
-    
+    try {
+      await ensureChunkLoadedForTime(currentTime);
+    } catch (e) {
+      pausePlayback();
+      return [];
+    }   
+ 
     // Grab the active events returned by our new Binary Search
     const activeEvents = renderActiveCommunications();
     
@@ -778,7 +781,7 @@ function renderActiveCommunications() {
     const timeline = parsedData.timeline;
     const activeEvents = [];
 
-    // --- NEW: Binary Search ($O(log N)$ instead of $O(N)$ filter) ---
+    // Binary Search
     if (timeline && timeline.length > 0) {
         let left = 0;
         let right = timeline.length - 1;
@@ -792,16 +795,23 @@ function renderActiveCommunications() {
                 right = mid - 1;
             }
         }
-        
+       
+        const MAX_VISIBLE_MESSAGES = 400;
+        let eventsCaptured = 0;
+ 
         // 'right' is now the index of the last event occurring before/at currentTime.
         // Step backwards to grab only the events within our time window!
         for (let i = right; i >= 0; i--) {
             if (timeline[i].time >= minTimeWindow) {
                 activeEvents.push(timeline[i]);
+                eventsCaptured++;
+                
+                // Abort immediately if the speed multiplier swallows too many events
+                if (eventsCaptured >= MAX_VISIBLE_MESSAGES) break; 
             } else {
                 break; // Stop immediately once we fall out of the time window
             }
-        }
+        } 
     }
     activeEvents.forEach(event => {
         const cat = MPI_CATEGORIES[event.call] || DEFAULT_CATEGORY;
