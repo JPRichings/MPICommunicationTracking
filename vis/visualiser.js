@@ -9,6 +9,8 @@ let uploadedFilePointer = null;
 let currentLoadedChunkIndex = -1;
 let headerLengthOffset = 0;
 let isChunkLoading = false; // Mutex Lock
+let chunkLoadPromise = null;        // Promise for the currently in-flight chunk load
+let chunkLoadIndexInFlight = -1;    // Which chunk index that promise is loading
 
 // Playback State
 let currentTime = 0;
@@ -31,6 +33,8 @@ const rankMap = new Map();  // Maps rank ID -> Process Mesh
 let activeLines = [];       // Currently rendered bezier curves
 let junctionPoints = [];    // Active receive/send ports
 let dynamicCells = {};      // HTML Table cell references
+
+const rankToNodeGroup = new Map();
 
 // Memory Caches
 const sharedMaterials = {};
@@ -134,6 +138,8 @@ function initThreeJS() {
     dirLight.position.set(200, 500, 300);
     scene.add(dirLight);
 
+    initSharedMaterials();
+
     animateThreeJS();
 }
 
@@ -215,56 +221,104 @@ async function handleFileUpload(event) {
     }
 }
 
+
 async function ensureChunkLoadedForTime(time) {
+    if (!parsedData?.chunks || !uploadedFilePointer) return;
+
     const chunks = parsedData.chunks;
-    if (!chunks) return;
+    if (!Array.isArray(chunks) || chunks.length === 0) return;
 
-    let targetIndex = chunks.findIndex(c => time <= c.t_end);
-    if (targetIndex === -1) targetIndex = chunks.length - 1;
-    if (targetIndex === currentLoadedChunkIndex) return;
+    const findTargetIndex = (t) => {
+        let idx = chunks.findIndex(c => t <= c.t_end);
+        if (idx === -1) idx = chunks.length - 1;
+        return idx;
+    };
 
-    // Mutex Lock
-    while (isChunkLoading) {
-        await new Promise(resolve => setTimeout(resolve, 10));
-    }
-    
-    targetIndex = chunks.findIndex(c => time <= c.t_end);
-    if (targetIndex === -1) targetIndex = chunks.length - 1;
-    if (targetIndex === currentLoadedChunkIndex) return;
+    // Loop handles the case where a different chunk is already loading:
+    // we wait for it, then re-check what we need.
+    while (true) {
+        const targetIndex = findTargetIndex(time);
 
-    isChunkLoading = true; 
+        // Already have the right chunk in memory
+        if (targetIndex === currentLoadedChunkIndex) return;
 
-    const overlay = document.getElementById('loadingOverlay');
-    const loadingText = document.getElementById('loadingText');
-    overlay.style.display = 'block';
-    loadingText.textContent = `Unpacking Chunk ${targetIndex + 1} of ${chunks.length}...`;
+        // If something is already loading, either wait for the same chunk,
+        // or wait for it to finish then try again.
+        if (chunkLoadPromise) {
+            if (chunkLoadIndexInFlight === targetIndex) {
+                await chunkLoadPromise;
+                return;
+            }
+            await chunkLoadPromise;
+            continue; // re-evaluate after the other load completes
+        }
 
-    await new Promise(resolve => setTimeout(resolve, 15));
+        // Start loading the required chunk
+        const overlay = document.getElementById("loadingOverlay");
+        const loadingText = document.getElementById("loadingText");
 
-    try {
-        const chunk = chunks[targetIndex];
-        const absoluteStart = headerLengthOffset + chunk.offset;
-        const absoluteEnd = absoluteStart + chunk.size;
+        chunkLoadIndexInFlight = targetIndex;
 
-        const chunkBlob = uploadedFilePointer.slice(absoluteStart, absoluteEnd);
-        const chunkText = await decompressBlob(chunkBlob);
-        
-        parsedData.timeline = JSON.parse(chunkText);
-        currentLoadedChunkIndex = targetIndex;
-        console.log(`Loaded Chunk ${targetIndex + 1}/${chunks.length}`);
-    } catch (error) {
-        console.error("Error loading chunk:", error);
-    } finally {
-        overlay.style.display = 'none';
-        isChunkLoading = false; 
+        chunkLoadPromise = (async () => {
+            try {
+                if (overlay) overlay.style.display = "block";
+                if (loadingText) {
+                    loadingText.textContent = `Unpacking Chunk ${targetIndex + 1} of ${chunks.length}...`;
+                }
+
+                // Yield so the browser can paint the overlay/text before heavy work
+                await new Promise(resolve => setTimeout(resolve, 0));
+
+                const chunk = chunks[targetIndex];
+
+                const absoluteStart = headerLengthOffset + chunk.offset;
+                const absoluteEnd = absoluteStart + chunk.size;
+
+                const chunkBlob = uploadedFilePointer.slice(absoluteStart, absoluteEnd);
+                const chunkText = await decompressBlob(chunkBlob);
+
+                const timeline = JSON.parse(chunkText);
+
+                // Optional safety: if your writer *guarantees* sorted-by-time, you can remove this.
+                if (Array.isArray(timeline) && timeline.length > 1) {
+                    // Only sort if it looks unsorted (cheap check)
+                    if (timeline[0].time > timeline[timeline.length - 1].time) {
+                        timeline.sort((a, b) => a.time - b.time);
+                    }
+                }
+
+                parsedData.timeline = timeline;
+                currentLoadedChunkIndex = targetIndex;
+
+                console.log(`Loaded Chunk ${targetIndex + 1}/${chunks.length}`);
+            } catch (error) {
+                console.error("Error loading chunk:", error);
+                // You can choose to clear timeline on failure:
+                // parsedData.timeline = [];
+            } finally {
+                if (overlay) overlay.style.display = "none";
+            }
+        })();
+
+        try {
+            await chunkLoadPromise;
+        } finally {
+            // Clear in-flight state (even if the load failed)
+            chunkLoadPromise = null;
+            chunkLoadIndexInFlight = -1;
+        }
+
+        return;
     }
 }
+
 
 // ==========================================
 // TOPOLOGY & HARDWARE
 // ==========================================
 function initDashboard() {
     pausePlayback();
+    nodeMap.forEach(group => scene.remove(group));
     nodeMap.clear();
     rankMap.clear();
     
@@ -307,11 +361,22 @@ function initDashboard() {
     document.getElementById("btn-play").disabled = false;
 
     buildHardwareTopology(topology);
+    buildRankIndex(parsedData.topology)
     renderSpectrogram();
     initDynamicSpectrogram();
     
     seekToTime(minTime);
 }
+
+function buildRankIndex(topology) {
+  rankToNodeGroup.clear();
+  topology.forEach(t => {
+    if (t.rank !== undefined && t.rank !== null) {
+      rankToNodeGroup.set(t.rank, nodeMap.get(t.hostname));
+    }
+  });
+}
+
 
 function buildHardwareTopology(topology) {
     const nodesMap = {};
@@ -765,11 +830,8 @@ function renderActiveCommunications() {
         if (event.sender === event.receiver) return;
 
         // Line Routing Logic
-        let sNode = null, rNode = null;
-        parsedData.topology.forEach(t => {
-            if (t.rank === event.sender) sNode = nodeMap.get(t.hostname);
-            if (t.rank === event.receiver) rNode = nodeMap.get(t.hostname);
-        });
+        const sNode = rankToNodeGroup.get(event.sender);
+        const rNode = rankToNodeGroup.get(event.receiver);
 
         if (sNode && rNode) {
             // If the communications are inside a single node.
@@ -794,6 +856,8 @@ function renderActiveCommunications() {
             }
         }
     });
+
+    return activeEvents;
 }
 
 function drawIntraNodeLine(startPos, endPos, callName) {
