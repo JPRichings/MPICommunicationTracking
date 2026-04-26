@@ -39,6 +39,10 @@ const rankToNodeGroup = new Map();
 const sharedMaterials = {};
 const sharedSphereGeo = new THREE.SphereGeometry(0.2, 8, 8);
 
+// Creating glyph for communication direction
+const sharedArrowGeo = new THREE.ConeGeometry(0.25, 0.8, 8);
+sharedArrowGeo.rotateX(Math.PI / 2);
+
 // 3D HOVER TOOLTIPS
 let tooltipEl;
 
@@ -981,8 +985,11 @@ function drawIntraNodeLine(startPos, endPos, callName) {
 
     // Add tiny junction points at the core boundaries
     const points = curve.getPoints(10); 
-    createJunctionPoint(points[0], callName);
-    createJunctionPoint(points[points.length - 1], callName);
+    createJunctionPoint(startPos, callName);
+    
+    // curve.getTangent(1.0) gets the exact mathematical angle at the very end of the curve
+    const tangent = curve.getTangent(1.0).normalize();
+    createArrowhead(endPos, tangent, callName);
 }
 
 function drawInterNodeLine(startPos, endPos, callName, sender, receiver) {
@@ -1019,18 +1026,34 @@ function drawInterNodeLine(startPos, endPos, callName, sender, receiver) {
 
     // Anchor strictly to the start and end of the curve
     const points = curve.getPoints(20); 
-    createJunctionPoint(points[0], callName);
-    createJunctionPoint(points[points.length - 1], callName);
+    createJunctionPoint(startPos, callName);
+    
+    // curve.getTangent(1.0) gets the exact mathematical angle at the very end of the curve
+    const tangent = curve.getTangent(1.0).normalize();
+    createArrowhead(endPos, tangent, callName);
 }
 
 function createJunctionPoint(pos, callName) {
     const mat = sharedMaterials[callName + "_junction"] || sharedMaterials["default_junction"];
-    
-    // We reuse the single sharedSphereGeo for every single junction
     const mesh = new THREE.Mesh(sharedSphereGeo, mat);
     mesh.position.copy(pos);
     scene.add(mesh);
     junctionPoints.push(mesh);
+}
+
+// Function to draw and aim the arrowhead
+function createArrowhead(pos, direction, callName) {
+    const mat = sharedMaterials[callName + "_junction"] || sharedMaterials["default_junction"];
+    const mesh = new THREE.Mesh(sharedArrowGeo, mat);
+    mesh.position.copy(pos);
+    
+    // Aim the arrowhead exactly along the tangent of the curve
+    const target = pos.clone().add(direction);
+    mesh.lookAt(target);
+    
+    scene.add(mesh);
+    // Push to the same array so clearLines() automatically cleans it up every frame
+    junctionPoints.push(mesh); 
 }
 
 function clearLines() {
