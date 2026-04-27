@@ -439,7 +439,7 @@ int remove_proc_data_files(int proc_id, char *local_hostname){
 int get_local_filename(char *filename, char *local_hostname, int proc_id){
   assert(process_id != -1);
 
-  snprintf(filename, STRING_LENGTH, ".%s-%s-%d", programname, local_hostname, proc_id);
+  snprintf(filename, STRING_LENGTH, ".%.256s-%.256s-%d", programname, local_hostname, proc_id);
 
   return 0;
 }
@@ -520,7 +520,6 @@ int gather_process_information(){
   MPI_Datatype block_types[5];
   MPI_Aint block_displacements[5];
   time_t t = time(NULL);
-  struct tm *tm = localtime(&t);
 
   get_processor_and_core(&chip, &core);
 
@@ -580,16 +579,16 @@ int write_global_information(){
   int i;
   assert(my_rank == 0);
  
-  // Use fixed-size buffers padded with null-terminators for safe binary parsing
-  char fixed_datetime[DATETIME_LENGTH] = {0};
-  char fixed_programname[STRING_LENGTH] = {0};
+  // Use fixed-size buffers padded with null-terminators
+  char fixed_datetime[64] = {0};
+  char fixed_programname[256] = {0};
   
-  strncpy(fixed_datetime, datetime, 63);
-  strncpy(fixed_programname, programname, 255);
+  snprintf(fixed_datetime, sizeof(fixed_datetime), "%.63s", datetime);
+  snprintf(fixed_programname, sizeof(fixed_programname), "%.255s", programname); 
  
   fwrite(&my_size, sizeof(int), 1, global_file);
-  fwrite(&fixed_datetime, sizeof(datetime), 1, global_file);
-  fwrite(&fixed_programname, sizeof(programname), 1, global_file);
+  fwrite(fixed_datetime, sizeof(char), 64, global_file);
+  fwrite(fixed_programname, sizeof(char), 256, global_file);
 
   for(i=0; i<my_size; i++){
     fwrite(&processes[i], sizeof(struct process_info), 1, global_file);
