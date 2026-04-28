@@ -268,26 +268,20 @@ async function ensureChunkLoadedForTime(time) {
         return idx;
     };
 
-    // Loop handles the case where a different chunk is already loading:
-    // we wait for it, then re-check what we need.
     while (true) {
         const targetIndex = findTargetIndex(time);
 
-        // Already have the right chunk in memory
         if (targetIndex === currentLoadedChunkIndex) return;
 
-        // If something is already loading, either wait for the same chunk,
-        // or wait for it to finish then try again.
         if (chunkLoadPromise) {
             if (chunkLoadIndexInFlight === targetIndex) {
                 await chunkLoadPromise;
                 return;
             }
             await chunkLoadPromise;
-            continue; // re-evaluate after the other load completes
+            continue; 
         }
 
-        // Start loading the required chunk
         const overlay = document.getElementById("loadingOverlay");
         const loadingText = document.getElementById("loadingText");
 
@@ -300,11 +294,9 @@ async function ensureChunkLoadedForTime(time) {
                     loadingText.textContent = `Unpacking Chunk ${targetIndex + 1} of ${chunks.length}...`;
                 }
 
-                // Yield so the browser can paint the overlay/text before heavy work
                 await new Promise(resolve => setTimeout(resolve, 0));
 
                 const chunk = chunks[targetIndex];
-
                 const absoluteStart = headerLengthOffset + chunk.offset;
                 const absoluteEnd = absoluteStart + chunk.size;
 
@@ -331,7 +323,6 @@ async function ensureChunkLoadedForTime(time) {
         try {
             await chunkLoadPromise;
         } finally {
-            // Clear in-flight state (even if the load failed)
             chunkLoadPromise = null;
             chunkLoadIndexInFlight = -1;
         }
@@ -364,7 +355,6 @@ function clearTopologyScene() {
   nodeMap.clear();
   rankMap.clear();
 
-  // Remove cabinetBox
   const toRemove = [];
   scene.traverse(obj => { if (obj.name === "cabinetBox") toRemove.push(obj); });
   toRemove.forEach(obj => {
@@ -399,12 +389,10 @@ function initDashboard() {
     slider.disabled = false;
     document.getElementById("btn-play").disabled = false;
 
-    buildHardwareTopology(topology);
-    buildRankIndex(parsedData.topology);
+    buildHardwareTopology();
     renderMetadata();
     renderSpectrogram();
     initDynamicSpectrogram();
-   
     initLegend();
  
     void seekToTime(minTime).catch(err => {
@@ -413,19 +401,10 @@ function initDashboard() {
     });
 }
 
-function buildRankIndex(topology) {
-  rankToNodeGroup.clear();
-  topology.forEach(t => {
-    if (t.rank !== undefined && t.rank !== null) {
-      rankToNodeGroup.set(t.rank, nodeMap.get(t.hostname));
-    }
-  });
-}
-
-function buildHardwareTopology(topology) {
+function buildHardwareTopology() {
     const nodesMap = {};
 
-    // Read topology blueprint (Handles Flat, Rack-based, and Blade-based structures)
+    // 1. Read topology blueprint and force Vertical Stacking
     if (parsedData.hardware_blueprint) {
         const bp = parsedData.hardware_blueprint;
 
@@ -439,234 +418,207 @@ function buildHardwareTopology(topology) {
                         const rackX = cabX + (rack.x_offset || 0);
                         const rackZ = cabZ + (rack.z_offset || 0);
 
-                        // Blade-based architecture
+                        // --- THE FIX: Force vertical stacking for every node in the rack ---
+                        let currentRackY = 0; 
+
                         if (rack.blades && Array.isArray(rack.blades)) {
                             rack.blades.forEach(blade => {
-                                const bladeY = blade.y_offset || 0;
-
                                 if (blade.nodes && Array.isArray(blade.nodes)) {
                                     blade.nodes.forEach(node => {
-                                        const host = node.hostname;
-                                        // Nodes sit side-by-side in the blade (X offset)
-                                        const absoluteX = rackX + (node.x_offset || (node.slot * 12));
-                                        // The blade dictates the vertical height
-                                        const absoluteY = bladeY;
-                                        
-                                        nodesMap[host] = { 
-                                            ranks: [], x: absoluteX, y: absoluteY, z: rackZ,
+                                        nodesMap[node.hostname] = { 
+                                            x: rackX, y: currentRackY, z: rackZ, ranks: [],
                                             cpus: node.cpus || 1, coresPerCpu: node.cores_per_cpu || 1 
                                         };
+                                        currentRackY += 12; // Stack 12 units high
                                     });
                                 }
                             });
                         } 
-                        // Node/rack based architecture
                         else if (rack.nodes && Array.isArray(rack.nodes)) {
                             rack.nodes.forEach(node => {
-                                const host = node.hostname;
-                                const absoluteY = (node.slot !== undefined ? node.slot : 0) * 15;
-
-                                nodesMap[host] = { 
-                                    ranks: [], x: rackX, y: absoluteY, z: rackZ,
+                                nodesMap[node.hostname] = { 
+                                    x: rackX, y: currentRackY, z: rackZ, ranks: [],
                                     cpus: node.cpus || 1, coresPerCpu: node.cores_per_cpu || 1 
                                 };
+                                currentRackY += 12; // Stack 12 units high
                             });
                         }
                     });
                 }
             });
         } else {
-            // Fallback for completely flat dictionary blueprints
             Object.keys(bp).forEach(host => {
                 const node = bp[host];
-                if (host !== "cabinets" && host !== "metadata") { 
+                if (host !== "cabinets" && host !== "metadata") {
                     nodesMap[host] = { 
                         ranks: [], x: node.x || 0, y: node.y || 0, z: node.z || 0,
-                        cpus: node.cpus || 1, coresPerCpu: node.cores_per_cpu || 1 
+                        cpus: node.cpus || 1, coresPerCpu: node.cores_per_cpu || 1
                     };
                 }
             });
         }
     }
 
-    // Add active MPI ranks and their physical locations
-    topology.forEach(proc => {
-        const host = proc.hostname || "unknown";
-        if (!nodesMap[host]) {
-            nodesMap[host] = { ranks: [], x: proc.x || 0, y: proc.y || 0, z: proc.z || 0, cpus: 1, coresPerCpu: 1 };
-        }
-        if (proc.rank !== undefined && proc.rank !== null) {
-            // Check if this rank is already in the array
-            if (!nodesMap[host].ranks.find(r => r.id === proc.rank)) {
-                nodesMap[host].ranks.push({
-                    id: proc.rank,
-                    chip: proc.chip !== undefined ? proc.chip : 0,
-                    core: proc.core !== undefined ? proc.core : nodesMap[host].ranks.length // Fallback
-                });
+    // 2. Map the Ranks to their Nodes
+    if (parsedData.topology && Array.isArray(parsedData.topology)) {
+        parsedData.topology.forEach(t => {
+            const host = t.hostname || "unknown";
+            if (!nodesMap[host]) {
+                nodesMap[host] = { x: t.x || 0, y: t.y || 0, z: t.z || 0, ranks: [], cpus: 1, coresPerCpu: 1 };
             }
-        }
-    });
+            if (t.rank !== undefined && t.rank !== null) {
+                if (!nodesMap[host].ranks.find(r => r.id === t.rank)) {
+                    nodesMap[host].ranks.push({
+                        id: t.rank, chip: t.chip !== undefined ? t.chip : 0, core: t.core !== undefined ? t.core : nodesMap[host].ranks.length
+                    });
+                }
+            }
+        });
+    }
 
-    let nodeIndex = 0;
-    const totalNodes = Object.keys(nodesMap).length;
+    // 3. Draw Nodes, Processors (Chips), and Cores
+    const boxW = 7;
+    const boxH = 11;
+    const boxD = 9;
     let maxY = 0;
+    let totalNodes = 0;
 
-    const sharedNodeGeo = new THREE.BoxGeometry(10, 10, 10);
+    const sharedNodeGeo = new THREE.BoxGeometry(boxW, boxH, boxD);
     const sharedNodeEdges = new THREE.EdgesGeometry(sharedNodeGeo);
     
-    // Split Node Materials (Active = Bright Blue, Idle = Ghostly Gray)
     const sharedActiveNodeMat = new THREE.LineBasicMaterial({ color: 0x58a6ff, transparent: true, opacity: 0.8 }); 
     const sharedIdleNodeMat = new THREE.LineBasicMaterial({ color: 0x4b5563, transparent: true, opacity: 0.2 });   
 
-    const sharedFillGeo = new THREE.BoxGeometry(9.8, 9.8, 9.8);
+    const sharedFillGeo = new THREE.BoxGeometry(boxW - 0.2, boxH - 0.2, boxD - 0.2);
     const sharedFillMat = new THREE.MeshBasicMaterial({ color: 0x161b22, transparent: true, opacity: 0.9 });
-
     const sharedChipMat = new THREE.MeshBasicMaterial({ color: 0x21262d, transparent: true, opacity: 0.8 });
     
-    const sharedActiveRankMat = new THREE.MeshLambertMaterial({ color: 0x4b5563, emissive: 0x58a6ff, emissiveIntensity: 0.15 });
-    
-    // Make Idle Cores a solid, brighter gray (wireframes vanish on high-res screens)
     const sharedIdleCoreMat = new THREE.MeshBasicMaterial({ color: 0x6e7681, transparent: true, opacity: 0.6 });
-    
-    // Caches for dynamically sized geometries (since core sizes depend on hardware specs)
-    const geometryCache = {};
+    const sharedActiveRankMat = new THREE.MeshLambertMaterial({ color: 0x4b5563, emissive: 0x58a6ff, emissiveIntensity: 0.15 });
 
-    // Build the scene
-    Object.keys(nodesMap).forEach(hostname => {
-        const data = nodesMap[hostname];
+    Object.keys(nodesMap).forEach(host => {
+        const nData = nodesMap[host];
+        if (nData.y > maxY) maxY = nData.y;
+        totalNodes++;
+
         const nodeGroup = new THREE.Group();
+        nodeGroup.position.set(nData.x, nData.y, nData.z);
+        scene.add(nodeGroup);
+        nData.group = nodeGroup;
+        rankToNodeGroup.set(host, nodeGroup);
 
-        let posX = data.x;
-        let posY = data.y;
-        let posZ = data.z;
+        nodeMap.set(host, nodeGroup);
 
-        // Vertical Tower Override
-        if (posY === 0 && posZ === 0 && posX === 0) {
-            posX = 0;
-            posY = nodeIndex * 15;
-            posZ = 0;
-        }
-
-        if (posY > maxY) maxY = posY;
-        nodeGroup.position.set(posX, posY, posZ);
-
-        // Check if the node is actively used in the trace
-        const isActiveNode = data.ranks.length > 0;
+        const isActiveNode = nData.ranks.length > 0;
         const currentNodeMat = isActiveNode ? sharedActiveNodeMat : sharedIdleNodeMat;
 
-        // Apply the correct colour based on activity
         const shellMesh = new THREE.LineSegments(sharedNodeEdges, currentNodeMat);
         shellMesh.name = "mpiNode";
+        shellMesh.userData = { hostname: host, isNode: true };
         nodeGroup.add(shellMesh);
 
         const fillMesh = new THREE.Mesh(sharedFillGeo, sharedFillMat);
         fillMesh.name = "mpiNodeFill";
         nodeGroup.add(fillMesh);
 
-        // Chip and core layout (strict hardware packing)
-        const numChips = data.cpus;
-        const numCores = data.coresPerCpu;
-
-        // Sort all ranks on this node sequentially by ID
-        const sortedRanks = data.ranks.sort((a, b) => a.id - b.id);
+        const numChips = nData.cpus || 1;
+        const numCores = nData.coresPerCpu || 1;
+        const ranks = nData.ranks.sort((a, b) => a.id - b.id);
 
         const chipCols = Math.ceil(Math.sqrt(numChips));
         const chipRows = Math.ceil(numChips / chipCols);
-        
-        const chipSpacingX = 9.2 / chipCols; 
-        const chipSpacingY = 9.2 / chipRows;
+        const chipSpaceX = (boxW - 0.5) / chipCols;
+        const chipSpaceY = (boxH - 0.5) / chipRows;
 
         const coreCols = Math.ceil(Math.sqrt(numCores));
         const coreRows = Math.ceil(numCores / coreCols);
-        
-        const maxCoreSpacingX = (chipSpacingX * 0.90) / coreCols; 
-        const maxCoreSpacingY = (chipSpacingY * 0.90) / coreRows;
+        const maxCoreSpacingX = (chipSpaceX * 0.90) / coreCols; 
+        const maxCoreSpacingY = (chipSpaceY * 0.90) / coreRows;
         
         const coreSpacing = Math.min(maxCoreSpacingX, maxCoreSpacingY);
-        const coreSize = coreSpacing * 0.90; 
+        const coreSize = coreSpacing * 0.80; 
+
+        const chipGeo = new THREE.BoxGeometry(chipSpaceX * 0.9, chipSpaceY * 0.9, 0.2);
+        const coreGeo = new THREE.BoxGeometry(coreSize, coreSize, coreSize);
 
         const actualGridWidth = coreCols * coreSpacing;
         const actualGridHeight = coreRows * coreSpacing;
 
-        const cacheKey = `${numChips}_${numCores}`;
-        if (!geometryCache[cacheKey]) {
-            geometryCache[cacheKey] = {
-                chip: new THREE.BoxGeometry(chipSpacingX * 0.9, chipSpacingY * 0.9, 0.5),
-                core: new THREE.BoxGeometry(coreSize, coreSize, coreSize)
-            };
-        }
-
         for (let c = 0; c < numChips; c++) {
             const cRow = Math.floor(c / chipCols);
             const cCol = c % chipCols;
-            const chipOffsetX = (cCol * chipSpacingX) - 4.6 + (chipSpacingX / 2);
-            const chipOffsetY = (cRow * chipSpacingY) - 4.6 + (chipSpacingY / 2);
+            
+            const chipOffsetX = (cCol * chipSpaceX) - ((chipCols - 1) * chipSpaceX) / 2;
+            const chipOffsetY = -((cRow * chipSpaceY) - ((chipRows - 1) * chipSpaceY) / 2);
+            const chipOffsetZ = (boxD / 2) - 0.3; 
 
-            // Draw Chip Backplate 
-            const chipMesh = new THREE.Mesh(geometryCache[cacheKey].chip, sharedChipMat);
-            chipMesh.position.set(chipOffsetX, chipOffsetY, 5.01); 
+            const chipMesh = new THREE.Mesh(chipGeo, sharedChipMat);
+            chipMesh.position.set(chipOffsetX, chipOffsetY, chipOffsetZ); 
             nodeGroup.add(chipMesh);
 
-            // Center the square grid perfectly inside the chip
             const startX = chipOffsetX - (actualGridWidth / 2) + (coreSpacing / 2);
-            const startY = chipOffsetY - (actualGridHeight / 2) + (coreSpacing / 2);
+            const startY = chipOffsetY + (actualGridHeight / 2) - (coreSpacing / 2); 
 
             for (let i = 0; i < numCores; i++) {
                 const iRow = Math.floor(i / coreCols);
                 const iCol = i % coreCols;
                 
                 const coreOffsetX = startX + (iCol * coreSpacing);
-                const coreOffsetY = startY + (iRow * coreSpacing);
+                const coreOffsetY = startY - (iRow * coreSpacing);
+                const coreOffsetZ = chipOffsetZ + 0.15; 
 
                 const globalSlotIndex = (c * numCores) + i;
-                const activeRank = sortedRanks[globalSlotIndex];
+                const activeRank = ranks[globalSlotIndex];
 
                 if (activeRank) {
                     const uniqueRankMat = sharedActiveRankMat.clone();
-                    const rankMesh = new THREE.Mesh(geometryCache[cacheKey].core, uniqueRankMat);
+                    const rankMesh = new THREE.Mesh(coreGeo, uniqueRankMat);
                     rankMesh.name = "mpiRank";
-                    
-                    // Attach the exact hardware payload to the 3D object for the tooltip
-                    rankMesh.userData = { 
-                        rank: activeRank.id, 
-                        host: hostname, 
-                        chip: c, 
-                        core: i 
-                    };
-
-                    rankMesh.position.set(coreOffsetX, coreOffsetY, 5.2); 
+                    rankMesh.userData = { rank: activeRank.id, host: host, chip: c, core: i, isCore: true };
+                    rankMesh.position.set(coreOffsetX, coreOffsetY, coreOffsetZ); 
                     nodeGroup.add(rankMesh);
+                    
                     rankMap.set(activeRank.id, rankMesh); 
+                    rankToNodeGroup.set(activeRank.id, nodeGroup); 
                 } else {
-                    const idleMesh = new THREE.Mesh(geometryCache[cacheKey].core, sharedIdleCoreMat);
+                    const idleMesh = new THREE.Mesh(coreGeo, sharedIdleCoreMat);
                     idleMesh.name = "idleCore";
-                    idleMesh.position.set(coreOffsetX, coreOffsetY, 5.2); 
+                    idleMesh.position.set(coreOffsetX, coreOffsetY, coreOffsetZ); 
                     nodeGroup.add(idleMesh);
                 }
             }
         }
-
-        scene.add(nodeGroup);
-        nodeMap.set(hostname, nodeGroup);
-        nodeIndex++;
     });
 
-    // CABINET & AUTO-FRAME
+    // 4. DRAW DYNAMIC CABINET BOX (Auto-framing)
     if (totalNodes > 0) {
-        const cabinetGeo = new THREE.BoxGeometry(20, maxY + 20, 20);
+        // Find the true width of the cluster to perfectly size the cabinet
+        let minX = 0, maxX = 0;
+        Object.values(nodesMap).forEach(n => {
+            if (n.x < minX) minX = n.x;
+            if (n.x > maxX) maxX = n.x;
+        });
+        
+        const cabWidth = Math.max(20, (maxX - minX) + 20);
+        const cabCenterX = minX + (maxX - minX) / 2;
+
+        const cabinetGeo = new THREE.BoxGeometry(cabWidth, maxY + 15, 20);
         const cabEdges = new THREE.EdgesGeometry(cabinetGeo);
         const cabinetMat = new THREE.LineBasicMaterial({ color: 0x8b949e, transparent: true, opacity: 0.5 });
         const cabinetMesh = new THREE.LineSegments(cabEdges, cabinetMat);
         cabinetMesh.name = "cabinetBox";
-        cabinetMesh.position.set(0, maxY / 2, 0);
+        
+        // Center the cabinet perfectly over the cluster
+        cabinetMesh.position.set(cabCenterX, maxY / 2, 0);
         scene.add(cabinetMesh);
+        
+        // Adjust camera to frame the new dynamic cabinet
+        const centerY = maxY / 2;
+        const distanceToPullBack = Math.max(300, cabWidth * 1.5, maxY * 1.5);
+        camera.position.set(cabCenterX, centerY, distanceToPullBack);
+        controls.target.set(cabCenterX, centerY, 0);
+        controls.update(); 
     }
-
-    const centerY = maxY / 2;
-    const distanceToPullBack = Math.max(300, totalNodes * 20);
-    camera.position.set(0, centerY, distanceToPullBack);
-    controls.target.set(0, centerY, 0);
-    controls.update(); 
 }
 
 // ==========================================
@@ -744,6 +696,7 @@ function onCanvasClick(event) {
         
         if (object.name === "mpiNode" || object.name === "mpiRank") {
             const targetPosition = new THREE.Vector3();
+            // getWorldPosition extracts the absolute 3D coordinate out of the THREE.Group
             object.getWorldPosition(targetPosition);
             
             flyCameraTo(targetPosition);
@@ -899,17 +852,13 @@ function renderActiveCommunications() {
         const MAX_VISIBLE_MESSAGES = 400;
         let eventsCaptured = 0;
  
-        // 'right' is now the index of the last event occurring before/at currentTime.
-        // Step backwards to grab only the events within our time window.
         for (let i = right; i >= 0; i--) {
             if (timeline[i].time >= minTimeWindow) {
                 activeEvents.push(timeline[i]);
                 eventsCaptured++;
-                
-                // Abort immediately if the speed multiplier swallows too many events
                 if (eventsCaptured >= MAX_VISIBLE_MESSAGES) break; 
             } else {
-                break; // Stop immediately once we fall out of the time window
+                break;
             }
         } 
     }
@@ -922,9 +871,8 @@ function renderActiveCommunications() {
         const recvMesh = rankMap.get(event.receiver);
 
         if (event.call === "MPI_WAIT" || event.call === "MPI_WAITALL") {
-            return; // Wait calls shouldn't force-extinguish or draw lines
+            return;
         } else {
-            // Ignite the ranks
             if (senderMesh) {
                 senderMesh.material.emissive.setHex(cat.color);
                 senderMesh.material.emissiveIntensity = 1.0;
@@ -938,11 +886,12 @@ function renderActiveCommunications() {
         if (event.sender === event.receiver) return;
 
        // Line Routing Logic
-        const sNode = rankToNodeGroup.get(event.sender);
-        const rNode = rankToNodeGroup.get(event.receiver);
+        const sNodeGroup = rankToNodeGroup.get(event.sender);
+        const rNodeGroup = rankToNodeGroup.get(event.receiver);
 
-        if (sNode && rNode) {
-            if (sNode === rNode) {
+        if (sNodeGroup && rNodeGroup) {
+            if (sNodeGroup === rNodeGroup) {
+                // Intra-node (Core to Core inside the same chassis)
                 const sRankMesh = rankMap.get(event.sender);
                 const rRankMesh = rankMap.get(event.receiver);
 
@@ -953,7 +902,6 @@ function renderActiveCommunications() {
                     sRankMesh.getWorldPosition(startWorld);
                     rRankMesh.getWorldPosition(endWorld);
 
-                    // --- THE FIX: Increased padding to 0.5 ---
                     const sDepth = sRankMesh.geometry.parameters.depth || 1.0;
                     const rDepth = rRankMesh.geometry.parameters.depth || 1.0;
                     startWorld.z += (sDepth / 2) + 0.5;
@@ -962,11 +910,11 @@ function renderActiveCommunications() {
                     drawIntraNodeLine(startWorld, endWorld, event.call);
                 }
             } else {
+                // Inter-node (Node chassis to Node chassis)
                 if (cat.type === "collective") {
-                    const startWorld = sNode.position.clone();
-                    const endWorld = rNode.position.clone();
+                    const startWorld = sNodeGroup.position.clone();
+                    const endWorld = rNodeGroup.position.clone();
                     
-                    // Padding to 5.5 (5.0 for node half-depth + 0.5 padding) to allow termination to be visible
                     startWorld.z += 5.5;
                     endWorld.z += 5.5;
 
@@ -984,7 +932,6 @@ function renderActiveCommunications() {
 
                         const sDepth = sRankMesh.geometry.parameters.depth || 1.0;
                         const rDepth = rRankMesh.geometry.parameters.depth || 1.0;
-                        // Padd with 0.5 to allow termination to be visible
                         startWorld.z += (sDepth / 2) + 0.5;
                         endWorld.z += (rDepth / 2) + 0.5;
 
@@ -1004,15 +951,12 @@ function drawIntraNodeLine(startPos, endPos, callName) {
     const midPoint = startPos.clone().lerp(endPos, 0.5);
     const distance = startPos.distanceTo(endPos);
 
-    // Bow straight out towards the user so the line doesn't cut through the cores
     const bowDistance = Math.max(distance * 0.4, 1.0); 
     midPoint.z += bowDistance;
 
     const curve = new THREE.QuadraticBezierCurve3(startPos, midPoint, endPos);
     
     const geometry = new THREE.TubeGeometry(curve, 12, 0.08, 6, false);
-
-    // Use the opaque Mesh material
     const material = sharedMaterials[callName + "_junction"] || sharedMaterials["default_junction"];
 
     const tube = new THREE.Mesh(geometry, material);
@@ -1020,11 +964,8 @@ function drawIntraNodeLine(startPos, endPos, callName) {
     scene.add(tube);
     activeLines.push(tube);
 
-    // Add tiny junction points at the core boundaries
-    const points = curve.getPoints(10); 
     createJunctionPoint(startPos, callName);
     
-    // curve.getTangent(1.0) gets the exact mathematical angle at the very end of the curve
     const tangent = curve.getTangent(1.0).normalize();
     createArrowhead(endPos, tangent, callName);
 }
@@ -1037,7 +978,6 @@ function drawInterNodeLine(startPos, endPos, callName, sender, receiver) {
     const bowDistance = Math.max(distance * 0.3, 2.0); 
     const laneOffset = (sender > receiver) ? 2.0 : -2.0;
 
-    // Track Separation Math
     if (cat.type === "collective") {
         midPoint.z += bowDistance; 
     } else if (cat.type === "p2p_nonblock") {
@@ -1050,10 +990,7 @@ function drawInterNodeLine(startPos, endPos, callName, sender, receiver) {
 
     const curve = new THREE.QuadraticBezierCurve3(startPos, midPoint, endPos);
     
-    // We use 20 segments here to keep the long arcs smooth, with the same 0.08 radius
     const geometry = new THREE.TubeGeometry(curve, 20, 0.08, 6, false);
-
-    // Because we are using a Tube (which is a Mesh), we must use the junction material 
     const material = sharedMaterials[callName + "_junction"] || sharedMaterials["default_junction"];
 
     const tube = new THREE.Mesh(geometry, material);
@@ -1061,11 +998,8 @@ function drawInterNodeLine(startPos, endPos, callName, sender, receiver) {
     scene.add(tube);
     activeLines.push(tube);
 
-    // Anchor strictly to the start and end of the curve
-    const points = curve.getPoints(20); 
     createJunctionPoint(startPos, callName);
     
-    // curve.getTangent(1.0) gets the exact mathematical angle at the very end of the curve
     const tangent = curve.getTangent(1.0).normalize();
     createArrowhead(endPos, tangent, callName);
 }
@@ -1078,32 +1012,26 @@ function createJunctionPoint(pos, callName) {
     junctionPoints.push(mesh);
 }
 
-// Function to draw and aim the arrowhead
 function createArrowhead(pos, direction, callName) {
     const mat = sharedMaterials[callName + "_junction"] || sharedMaterials["default_junction"];
     const mesh = new THREE.Mesh(sharedArrowGeo, mat);
     mesh.position.copy(pos);
     
-    // Aim the arrowhead exactly along the tangent of the curve
     const target = pos.clone().add(direction);
     mesh.lookAt(target);
     
     scene.add(mesh);
-    // Push to the same array so clearLines() automatically cleans it up every frame
     junctionPoints.push(mesh); 
 }
 
 function clearLines() {
     activeLines.forEach(line => {
-        // We only dispose the geometry now, because the curve is unique.
-        // We do not dispose the material, because it is shared.
         if (line.geometry) line.geometry.dispose();
         scene.remove(line);
     });
     activeLines = [];
 
     junctionPoints.forEach(pt => {
-        // We do not dispose geometry or material. Both are shared.
         scene.remove(pt);
     });
     junctionPoints = [];
@@ -1112,7 +1040,6 @@ function clearLines() {
 function renderMetadata() {
     let container = document.getElementById("metadataContainer");
     
-    // Dynamic injection fallback if the user hasn't added the div to their HTML yet
     if (!container) {
         const timeSlider = document.getElementById("timeSlider");
         if (timeSlider) {
@@ -1126,21 +1053,17 @@ function renderMetadata() {
             container.style.borderRadius = "8px";
             timelinePanel.parentNode.insertBefore(container, timelinePanel);
         } else {
-            return; // Safety exit if UI elements aren't found
+            return; 
         }
     }
     
     container.innerHTML = "";
     
-    // Extract metadata from the parsed .mpix file header
     const meta = parsedData.metadata || parsedData.info || {};
     const programName = meta.program || meta.executable || meta.name || "Unknown Program";
     const runDate = meta.date || meta.timestamp || "Unknown Date";
-   
-    // Extract the topology metadata from the parsed .mpix file
     const systemName = meta.system_name || "Unknown System";
  
-    // Calculate scale from topology
     const totalRanks = parsedData.topology ? parsedData.topology.length : 0;
     
     const activeNodes = new Set();
@@ -1201,8 +1124,6 @@ async function startUIRecording({ fps = 60, bitsPerSecond = 8_000_000 } = {}) {
     return;
   }
 
-  // NOTE: Browser will show a permission picker.
-  // On Chromium you can typically pick "This tab" for best results.
   uiStream = await navigator.mediaDevices.getDisplayMedia({
     video: {
       frameRate: fps,
@@ -1227,7 +1148,6 @@ async function startUIRecording({ fps = 60, bitsPerSecond = 8_000_000 } = {}) {
     const blob = new Blob(uiRecordedChunks, { type: uiMediaRecorder.mimeType || "video/webm" });
     downloadBlob(blob, `mpi-vis-ui-${getTimestampSlug()}-t${currentTime.toFixed(3)}.webm`);
 
-    // Cleanup
     uiRecordedChunks = [];
     try { uiStream?.getTracks()?.forEach(t => t.stop()); } catch {}
     uiStream = null;
@@ -1241,7 +1161,6 @@ async function startUIRecording({ fps = 60, bitsPerSecond = 8_000_000 } = {}) {
     if (stopBtn) stopBtn.disabled = true;
   };
 
-  // If the user stops sharing from the browser UI, stop cleanly:
   uiStream.getVideoTracks()[0].addEventListener("ended", () => {
     if (uiMediaRecorder) uiMediaRecorder.stop();
   });
@@ -1261,16 +1180,12 @@ function stopUIRecording() {
   uiMediaRecorder.stop();
 }
 
-
-
 // ======
 // LEGEND
 // ======
 function initLegend() {
-    // Prevent duplicate legends if the user loads multiple profiles
     if (document.getElementById("mpiLegend")) return;
 
-    // Create the floating panel
     const legendDiv = document.createElement("div");
     legendDiv.id = "mpiLegend";
     legendDiv.style.position = "absolute";
@@ -1284,7 +1199,7 @@ function initLegend() {
     legendDiv.style.fontFamily = "'Fira Code', monospace, sans-serif";
     legendDiv.style.fontSize = "0.8rem";
     legendDiv.style.zIndex = "1000";
-    legendDiv.style.pointerEvents = "none"; // Lets user click/drag the 3D camera *through* the legend
+    legendDiv.style.pointerEvents = "none"; 
     legendDiv.style.boxShadow = "0 4px 12px rgba(0,0,0,0.5)";
     legendDiv.style.backdropFilter = "blur(4px)";
 
@@ -1296,13 +1211,11 @@ function initLegend() {
     title.style.color = "#8b949e";
     legendDiv.appendChild(title);
 
-    // Group the dictionary by category type to avoid drawing 20 duplicate blue boxes
     const uniqueTypes = {};
     Object.values(MPI_CATEGORIES).forEach(cat => {
         if (!uniqueTypes[cat.type]) uniqueTypes[cat.type] = cat.color;
     });
 
-    // Clean up the internal code names for the UI
     const formatName = (str) => {
         if (str === "p2p_block") return "P2P Blocking";
         if (str === "p2p_nonblock") return "P2P Non-Blocking";
@@ -1311,34 +1224,31 @@ function initLegend() {
         return str;
     };
 
-    // Draw the colour swatches
     Object.entries(uniqueTypes).forEach(([type, hexColor]) => {
         const row = document.createElement("div");
         row.style.display = "flex";
         row.style.alignItems = "center";
         row.style.marginBottom = "6px";
 
-        const colourBox = document.createElement("div");
-        colourBox.style.width = "12px";
-        colourBox.style.height = "12px";
-        colourBox.style.marginRight = "10px";
-        colourBox.style.borderRadius = "2px";
-        // Convert the Three.js hex number back into a standard CSS #hex string
-        colourBox.style.backgroundColor = '#' + hexColor.toString(16).padStart(6, '0');
-        colourBox.style.boxShadow = `0 0 5px ${colourBox.style.backgroundColor}`; // Subtle glow
+        const colorBox = document.createElement("div");
+        colorBox.style.width = "12px";
+        colorBox.style.height = "12px";
+        colorBox.style.marginRight = "10px";
+        colorBox.style.borderRadius = "2px";
+        colorBox.style.backgroundColor = '#' + hexColor.toString(16).padStart(6, '0');
+        colorBox.style.boxShadow = `0 0 5px ${colorBox.style.backgroundColor}`;
 
         const label = document.createElement("span");
         label.textContent = formatName(type);
 
-        row.appendChild(colourBox);
+        row.appendChild(colorBox);
         row.appendChild(label);
         legendDiv.appendChild(row);
     });
 
-    // Mount it directly over the 3D Canvas
     const container = document.getElementById("visCanvas");
     if (container) {
-        container.style.position = "relative"; // Required to anchor the absolute legend
+        container.style.position = "relative";
         container.appendChild(legendDiv);
     }
 }
@@ -1364,7 +1274,6 @@ function renderSpectrogram() {
 
     calls.forEach(call => {
         const tr = document.createElement('tr');
-        // Label
         const tdLabel = document.createElement('td');
         tdLabel.textContent = call.replace('MPI_', '');
         tdLabel.style.color = '#8b949e';
@@ -1372,8 +1281,6 @@ function renderSpectrogram() {
         tdLabel.style.paddingRight = '8px';
         tr.appendChild(tdLabel);
 
-        // Blocks
-        // Using Object.entries instead of Object.values so we can grab the 'bin' name for the tooltip
         Object.entries(stats[call]).forEach(([bin, val]) => {
             const td = document.createElement('td');
             td.style.border = 'none';
@@ -1381,14 +1288,13 @@ function renderSpectrogram() {
             td.style.height = '20px';
             td.style.width = '35px';
             
-            // Add the native browser tooltip
             td.title = `${call} (${bin}): ${val} total messages`;
             
             if (val === 0) {
                 td.style.backgroundColor = '#161b22';
             } else {
                 const intensity = Math.max(0.15, val / maxVal);
-                td.style.backgroundColor = `rgba(88, 166, 255, ${intensity})`; // Blue Overall
+                td.style.backgroundColor = `rgba(88, 166, 255, ${intensity})`; 
             }
             tr.appendChild(td);
         });
@@ -1432,7 +1338,6 @@ function initDynamicSpectrogram() {
             td.style.backgroundColor = '#161b22';
             td.style.transition = 'background-color 0.15s ease-out'; 
             
-            // Add the initial blank tooltip
             td.title = `${call} (${bin}): 0 active messages`;
             
             dynamicCells[call][bin] = td;
@@ -1459,7 +1364,6 @@ function updateDynamicSpectrogram(activeEvents) {
         binsTemplate.forEach(b => currentCounts[c][b] = 0);
     });
 
-    // Only tally the specific events active in the 3D scene right now
     for (let i = 0; i < activeEvents.length; i++) {
         const event = activeEvents[i];
         const call = event.call;
@@ -1476,13 +1380,11 @@ function updateDynamicSpectrogram(activeEvents) {
     let globalMax = 0;
     calls.forEach(c => binsTemplate.forEach(b => { if (stats[c][b] > globalMax) globalMax = stats[c][b]; }));
 
-    // Update Floating Blocks
     calls.forEach(call => {
         binsTemplate.forEach(bin => {
             const count = currentCounts[call][bin];
             const td = dynamicCells[call][bin];
             
-            // Dynamically update the tooltip with the live count
             td.title = `${call} (${bin}): ${count} active messages`;
             
             if (count === 0) {
@@ -1490,7 +1392,7 @@ function updateDynamicSpectrogram(activeEvents) {
             } else {
                 const denom = globalMax > 0 ? globalMax : 1;
                 const intensity = Math.max(0.15, count / denom);
-                td.style.backgroundColor = `rgba(46, 160, 67, ${intensity})`; // Green Active
+                td.style.backgroundColor = `rgba(46, 160, 67, ${intensity})`; 
             }
         });
     });
