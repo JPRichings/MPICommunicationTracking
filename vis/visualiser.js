@@ -519,6 +519,7 @@ function buildHardwareTopology() {
 
         const fillMesh = new THREE.Mesh(sharedFillGeo, sharedFillMat);
         fillMesh.name = "mpiNodeFill";
+        fillMesh.userData = { hostname: host, isNode: true };
         nodeGroup.add(fillMesh);
 
         const numChips = nData.cpus || 1;
