@@ -57,6 +57,7 @@ let defaultCameraPose = null;   // set after buildHardwareTopology() auto-frames
 let selectedObject = null;      // last clicked mpiNode/mpiRank
 let isFollowEnabled = false;
 let followOffset = new THREE.Vector3(0, 15, 40);
+let desiredCam = controls.target.clone().add(followOffset);
 
 const nodeOriginalPos = new Map();
 let currentLayoutMode = "blueprint";
@@ -279,8 +280,13 @@ async function handleFileUpload(event) {
             const headerBlob = uploadedFilePointer.slice(4, headerLengthOffset);
             const headerText = await decompressBlob(headerBlob);
             
-            parsedData = JSON.parse(headerText);
-            parsedData.timeline = [];
+            try {
+    parsedData = JSON.parse(headerText);
+    parsedData.timeline = [];
+} catch (parseError) {
+    alert("Failed to parse the MPI profile data. The file may be corrupted.");
+    return; 
+} 
         } else {
             alert("Please upload a packaged .mpix file for large traces.");
             return;
@@ -426,6 +432,7 @@ defaultCameraPose = null;
 }
 
 function initDashboard() {
+    if (!parsedData) return;
     pausePlayback();
     clearTopologyScene();
     rankToNodeGroup.clear();   
@@ -466,7 +473,7 @@ function initDashboard() {
 function initTooltip() {
   const existing = document.getElementById("mpiTooltip");
   if (existing) {
-    ooltipEl = existing;
+    tooltipEl = existing;
     return;
   }   
  
@@ -503,7 +510,7 @@ function setCameraPose(pose) {
   camera.position.copy(pose.position);
   controls.target.copy(pose.target);
   controls.update();
-
+}
 
 function animateCameraPose(toPose, duration = 650) {
   const from = getCameraPose();
@@ -596,9 +603,13 @@ function setSelectedObject(obj) {
     return;
   }
 
-  // If we clicked a rank mesh, show its rank id if we can infer it (optional)
-  // (You could attach rank id in userData when creating the mesh.)
-  status.textContent = `Selected: ${selectedObject.name}`;
+  if (selectedObject.userData?.rank !== undefined) {
+    status.textContent = `Selected rank ${selectedObject.userData.rank} @ ${selectedObject.userData.host}`;
+  } else if (selectedObject.userData?.host) {
+    status.textContent = `Selected node ${selectedObject.userData.host}`;
+  } else {
+    status.textContent = `Selected: ${selectedObject.name || "object"}`;
+  }
 }
 
 function setFollowEnabled(enabled) {
@@ -624,7 +635,6 @@ function updateFollowCamera() {
   controls.target.lerp(targetPos, 0.18);
 
   // Keep constant offset
-  const desiredCam = controls.target.clone().add(followOffset);
   camera.position.lerp(desiredCam, 0.18);
 
   controls.update();
@@ -689,9 +699,11 @@ function applyLayout(mode) {
   });
 
   // Optionally hide cabinet box when layout isn't blueprint
-  const cabinet = scene.getObjectByName("cabinetBox");
-  if (cabinet) cabinet.visible = (mode === "blueprint");
-
+  scene.traverse(obj => {
+  if (obj.name === "cabinetBox" || obj.name === "groupBox") {
+    obj.visible = (mode === "blueprint");
+  }
+});
   animateNodePositions(targets, 650);
 
   // Reframe camera nicely for the mode
@@ -1167,9 +1179,9 @@ function flyCameraTo(targetPos) {
         if (t < 1) {
             requestAnimationFrame(animateTransition);
         } else {
-            controls.enabled = true;
-            controls.update();
-        }
+           controls.enabled = !isFollowEnabled;
+           controls.update();
+       }
     }
     
     requestAnimationFrame(animateTransition);
