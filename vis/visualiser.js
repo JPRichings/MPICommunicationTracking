@@ -139,7 +139,8 @@ function initThreeJS() {
     camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 2000);    
     camera.position.set(0, 100, 300);
 
-    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    // Enable Logarithmic Depth Buffer to kill long-distance shimmering 
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, logarithmicDepthBuffer: true });
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.setClearColor(0x0d1117, 1);
     container.appendChild(renderer.domElement);
@@ -162,6 +163,7 @@ function initThreeJS() {
 
     const grid = new THREE.GridHelper(1000, 50, 0x30363d, 0x21262d);
     grid.position.y = -10;
+    grid.name = "floorGrid"; // Name the grid so we can move it later
     scene.add(grid);
 
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.8); 
@@ -356,7 +358,12 @@ function clearTopologyScene() {
   rankMap.clear();
 
   const toRemove = [];
-  scene.traverse(obj => { if (obj.name === "cabinetBox") toRemove.push(obj); });
+  scene.traverse(obj => { 
+      if (obj.name === "cabinetBox" || obj.name === "groupBox") { 
+          toRemove.push(obj); 
+      } 
+  });
+  
   toRemove.forEach(obj => {
     collectDisposableResources(obj, geoms, mats);
     scene.remove(obj);
@@ -401,65 +408,137 @@ function initDashboard() {
     });
 }
 
+
+
+// ==========================================
+// 3D HOVER TOOLTIPS
+// ==========================================
+function initTooltip() {
+    if (document.getElementById("mpiTooltip")) return;
+    
+    tooltipEl = document.createElement('div');
+    tooltipEl.id = "mpiTooltip";
+    tooltipEl.style.position = 'absolute';
+    tooltipEl.style.display = 'none';
+    tooltipEl.style.pointerEvents = 'none'; // Critical so it doesn't block the mouse
+    tooltipEl.style.backgroundColor = 'rgba(22, 27, 34, 0.95)';
+    tooltipEl.style.border = '1px solid #58a6ff';
+    tooltipEl.style.borderRadius = '6px';
+    tooltipEl.style.padding = '10px 15px';
+    tooltipEl.style.color = '#c9d1d9';
+    tooltipEl.style.fontFamily = "'Fira Code', monospace";
+    tooltipEl.style.fontSize = '0.85rem';
+    tooltipEl.style.zIndex = '2000';
+    tooltipEl.style.boxShadow = '0 4px 12px rgba(0,0,0,0.8)';
+    document.body.appendChild(tooltipEl);
+}
+
 function buildHardwareTopology() {
     const nodesMap = {};
+    const groupBoxes = []; // Stores our dynamic Blade and Chassis wireframe boundaries
 
-    // 1. Read topology blueprint and force Vertical Stacking
+    const boxW = 7;
+    const boxH = 11;
+    const boxD = 9;
+
+    // Force the Auto-Layout Grid (Ignores Python Offsets entirely)
     if (parsedData.hardware_blueprint) {
         const bp = parsedData.hardware_blueprint;
+        let currentCabX = 0;
 
         if (bp.cabinets && Array.isArray(bp.cabinets)) {
             bp.cabinets.forEach(cabinet => {
-                const cabX = cabinet.x || 0;
-                const cabZ = cabinet.z || 0;
+                let currentRackX = currentCabX;
 
                 if (cabinet.racks && Array.isArray(cabinet.racks)) {
                     cabinet.racks.forEach(rack => {
-                        const rackX = cabX + (rack.x_offset || 0);
-                        const rackZ = cabZ + (rack.z_offset || 0);
-
-                        // --- THE FIX: Force vertical stacking for every node in the rack ---
-                        let currentRackY = 0; 
+                        let rMinX = Infinity, rMaxX = -Infinity;
+                        let rMinY = Infinity, rMaxY = -Infinity;
 
                         if (rack.blades && Array.isArray(rack.blades)) {
-                            rack.blades.forEach(blade => {
+                            rack.blades.forEach((blade, bIdx) => {
+                                let bMinX = Infinity, bMaxX = -Infinity;
+                                let bMinY = Infinity, bMaxY = -Infinity;
+
                                 if (blade.nodes && Array.isArray(blade.nodes)) {
-                                    blade.nodes.forEach(node => {
+                                    blade.nodes.forEach((node, nIdx) => {
+                                        // FORCE: Nodes sit side-by-side (X), Blades stack vertically (Y)
+                                        const absoluteX = currentRackX + (nIdx * 8); 
+                                        const absoluteY = bIdx * 12; 
+
                                         nodesMap[node.hostname] = { 
-                                            x: rackX, y: currentRackY, z: rackZ, ranks: [],
+                                            x: absoluteX, y: absoluteY, z: 0, ranks: [],
                                             cpus: node.cpus || 1, coresPerCpu: node.cores_per_cpu || 1 
                                         };
-                                        currentRackY += 12; // Stack 12 units high
+
+                                        // Expand Bounding Boxes
+                                        if (absoluteX < bMinX) bMinX = absoluteX;
+                                        if (absoluteX > bMaxX) bMaxX = absoluteX;
+                                        if (absoluteY < bMinY) bMinY = absoluteY;
+                                        if (absoluteY > bMaxY) bMaxY = absoluteY;
+                                        
+                                        if (absoluteX < rMinX) rMinX = absoluteX;
+                                        if (absoluteX > rMaxX) rMaxX = absoluteX;
+                                        if (absoluteY < rMinY) rMinY = absoluteY;
+                                        if (absoluteY > rMaxY) rMaxY = absoluteY;
+                                    });
+                                }
+
+                                // Create Blade Bounding Box
+                                if (bMinX !== Infinity) {
+                                    groupBoxes.push({
+                                        type: 'blade',
+                                        x: bMinX + (bMaxX - bMinX) / 2, y: bMinY, z: 0,
+                                        w: (bMaxX - bMinX) + boxW + 1.5, h: boxH + 1.5, d: boxD + 1.5
                                     });
                                 }
                             });
-                        } 
-                        else if (rack.nodes && Array.isArray(rack.nodes)) {
-                            rack.nodes.forEach(node => {
-                                nodesMap[node.hostname] = { 
-                                    x: rackX, y: currentRackY, z: rackZ, ranks: [],
-                                    cpus: node.cpus || 1, coresPerCpu: node.cores_per_cpu || 1 
-                                };
-                                currentRackY += 12; // Stack 12 units high
+                        }
+
+                        // Create Chassis Bounding Box
+                        if (rMinX !== Infinity) {
+                            groupBoxes.push({
+                                type: 'chassis',
+                                x: rMinX + (rMaxX - rMinX) / 2, y: rMinY + (rMaxY - rMinY) / 2, z: 0,
+                                w: (rMaxX - rMinX) + boxW + 5, h: (rMaxY - rMinY) + boxH + 5, d: boxD + 5
                             });
+                            // Shift the X coordinate over for the next Chassis so they sit side-by-side
+                            currentRackX += (rMaxX - rMinX) + 25; 
                         }
                     });
                 }
+                currentCabX = currentRackX + 40; 
             });
         } else {
+            // Flat dictionary fallback
             Object.keys(bp).forEach(host => {
                 const node = bp[host];
                 if (host !== "cabinets" && host !== "metadata") {
-                    nodesMap[host] = { 
-                        ranks: [], x: node.x || 0, y: node.y || 0, z: node.z || 0,
-                        cpus: node.cpus || 1, coresPerCpu: node.cores_per_cpu || 1
-                    };
+                    nodesMap[host] = { ranks: [], x: node.x || 0, y: node.y || 0, z: node.z || 0, cpus: node.cpus || 1, coresPerCpu: node.cores_per_cpu || 1 };
                 }
             });
         }
     }
 
-    // 2. Map the Ranks to their Nodes
+    // Draw the Visual Grouping Boxes (Blades & Chassis)
+    groupBoxes.forEach(g => {
+        const geo = new THREE.BoxGeometry(g.w, g.h, g.d);
+        const edges = new THREE.EdgesGeometry(geo);
+        
+        const color = g.type === 'blade' ? 0x4b5563 : 0x8b949e;
+        const opacity = g.type === 'blade' ? 0.2 : 0.4;
+
+        const mat = new THREE.LineBasicMaterial({ color: color, transparent: true, opacity: opacity });
+        const mesh = new THREE.LineSegments(edges, mat);
+        
+        mesh.name = "groupBox"; 
+        
+        mesh.userData = { isGrouping: true, type: g.type };
+        mesh.position.set(g.x, g.y, g.z);
+        scene.add(mesh);
+    }); 
+
+    // Map the Ranks to their Nodes
     if (parsedData.topology && Array.isArray(parsedData.topology)) {
         parsedData.topology.forEach(t => {
             const host = t.hostname || "unknown";
@@ -476,11 +555,8 @@ function buildHardwareTopology() {
         });
     }
 
-    // 3. Draw Nodes, Processors (Chips), and Cores
-    const boxW = 7;
-    const boxH = 11;
-    const boxD = 9;
-    let maxY = 0;
+    // Draw Nodes, Processors (Chips), and Cores
+    let maxY = 0, minX = Infinity, maxX = -Infinity;
     let totalNodes = 0;
 
     const sharedNodeGeo = new THREE.BoxGeometry(boxW, boxH, boxD);
@@ -490,7 +566,7 @@ function buildHardwareTopology() {
     const sharedIdleNodeMat = new THREE.LineBasicMaterial({ color: 0x4b5563, transparent: true, opacity: 0.2 });   
 
     const sharedFillGeo = new THREE.BoxGeometry(boxW - 0.2, boxH - 0.2, boxD - 0.2);
-    const sharedFillMat = new THREE.MeshBasicMaterial({ color: 0x161b22, transparent: true, opacity: 0.9 });
+    const sharedFillMat = new THREE.MeshBasicMaterial({ color: 0x161b22, transparent: true, opacity: 0.9, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
     const sharedChipMat = new THREE.MeshBasicMaterial({ color: 0x21262d, transparent: true, opacity: 0.8 });
     
     const sharedIdleCoreMat = new THREE.MeshBasicMaterial({ color: 0x6e7681, transparent: true, opacity: 0.6 });
@@ -499,6 +575,8 @@ function buildHardwareTopology() {
     Object.keys(nodesMap).forEach(host => {
         const nData = nodesMap[host];
         if (nData.y > maxY) maxY = nData.y;
+        if (nData.x < minX) minX = nData.x;
+        if (nData.x > maxX) maxX = nData.x;
         totalNodes++;
 
         const nodeGroup = new THREE.Group();
@@ -506,7 +584,6 @@ function buildHardwareTopology() {
         scene.add(nodeGroup);
         nData.group = nodeGroup;
         rankToNodeGroup.set(host, nodeGroup);
-
         nodeMap.set(host, nodeGroup);
 
         const isActiveNode = nData.ranks.length > 0;
@@ -591,58 +668,22 @@ function buildHardwareTopology() {
         }
     });
 
-    // 4. DRAW DYNAMIC CABINET BOX (Auto-framing)
+    // Adjust camera to perfectly frame the new auto-layout
     if (totalNodes > 0) {
-        // Find the true width of the cluster to perfectly size the cabinet
-        let minX = 0, maxX = 0;
-        Object.values(nodesMap).forEach(n => {
-            if (n.x < minX) minX = n.x;
-            if (n.x > maxX) maxX = n.x;
-        });
-        
-        const cabWidth = Math.max(20, (maxX - minX) + 20);
-        const cabCenterX = minX + (maxX - minX) / 2;
-
-        const cabinetGeo = new THREE.BoxGeometry(cabWidth, maxY + 15, 20);
-        const cabEdges = new THREE.EdgesGeometry(cabinetGeo);
-        const cabinetMat = new THREE.LineBasicMaterial({ color: 0x8b949e, transparent: true, opacity: 0.5 });
-        const cabinetMesh = new THREE.LineSegments(cabEdges, cabinetMat);
-        cabinetMesh.name = "cabinetBox";
-        
-        // Center the cabinet perfectly over the cluster
-        cabinetMesh.position.set(cabCenterX, maxY / 2, 0);
-        scene.add(cabinetMesh);
-        
-        // Adjust camera to frame the new dynamic cabinet
+        const cabWidth = (maxX - minX);
+        const cabCenterX = minX + cabWidth / 2;
         const centerY = maxY / 2;
         const distanceToPullBack = Math.max(300, cabWidth * 1.5, maxY * 1.5);
+ 
+        const floorGrid = scene.getObjectByName("floorGrid");
+        if (floorGrid) {
+            floorGrid.position.set(cabCenterX, -10, 0);
+        }       
+ 
         camera.position.set(cabCenterX, centerY, distanceToPullBack);
         controls.target.set(cabCenterX, centerY, 0);
         controls.update(); 
     }
-}
-
-// ==========================================
-// 3D HOVER TOOLTIPS
-// ==========================================
-function initTooltip() {
-    if (document.getElementById("mpiTooltip")) return;
-    
-    tooltipEl = document.createElement('div');
-    tooltipEl.id = "mpiTooltip";
-    tooltipEl.style.position = 'absolute';
-    tooltipEl.style.display = 'none';
-    tooltipEl.style.pointerEvents = 'none'; // Critical so it doesn't block the mouse
-    tooltipEl.style.backgroundColor = 'rgba(22, 27, 34, 0.95)';
-    tooltipEl.style.border = '1px solid #58a6ff';
-    tooltipEl.style.borderRadius = '6px';
-    tooltipEl.style.padding = '10px 15px';
-    tooltipEl.style.color = '#c9d1d9';
-    tooltipEl.style.fontFamily = "'Fira Code', monospace";
-    tooltipEl.style.fontSize = '0.85rem';
-    tooltipEl.style.zIndex = '2000';
-    tooltipEl.style.boxShadow = '0 4px 12px rgba(0,0,0,0.8)';
-    document.body.appendChild(tooltipEl);
 }
 
 function onMouseMove(event) {
@@ -656,21 +697,42 @@ function onMouseMove(event) {
     const intersects = raycaster.intersectObjects(scene.children, true);
 
     let hoveredRank = null;
+    let hoveredNode = null;
+
+    // Search the intersected objects
     for (let i = 0; i < intersects.length; i++) {
-        if (intersects[i].object.name === "mpiRank") {
-            hoveredRank = intersects[i].object;
-            break;
+        const obj = intersects[i].object;
+        
+        if (obj.userData && obj.userData.isCore) {
+            hoveredRank = obj;
+            break; // Ranks are the smallest/most specific, so we stop looking
+        } else if (obj.userData && obj.userData.isNode && !hoveredNode) {
+            hoveredNode = obj; // Save the node, but keep looking in case there's a core behind it
         }
     }
 
-    if (hoveredRank) {
-        const data = hoveredRank.userData;
-        tooltipEl.innerHTML = `
-            <strong style="color: #58a6ff; font-size: 1.0rem;">Rank ${data.rank}</strong><br/>
-            <hr style="border: 0; border-top: 1px solid #30363d; margin: 6px 0;">
-            <span style="color: #8b949e;">Host:</span> ${data.host}<br/>
-            <span style="color: #8b949e;">Chip:</span> ${data.chip} | <span style="color: #8b949e;">Core:</span> ${data.core}
-        `;
+    const targetObj = hoveredRank || hoveredNode;
+
+    if (targetObj) {
+        const data = targetObj.userData;
+        
+        if (data.isCore) {
+            // Core Tooltip
+            tooltipEl.innerHTML = `
+                <strong style="color: #58a6ff; font-size: 1.0rem;">Rank ${data.rank}</strong><br/>
+                <hr style="border: 0; border-top: 1px solid #30363d; margin: 6px 0;">
+                <span style="color: #8b949e;">Host:</span> ${data.host}<br/>
+                <span style="color: #8b949e;">Chip:</span> ${data.chip} | <span style="color: #8b949e;">Core:</span> ${data.core}
+            `;
+        } else if (data.isNode) {
+            // Node Chassis Tooltip
+            tooltipEl.innerHTML = `
+                <strong style="color: #8b949e; font-size: 1.0rem;">Node Chassis</strong><br/>
+                <hr style="border: 0; border-top: 1px solid #30363d; margin: 6px 0;">
+                <span style="color: #8b949e;">Host:</span> <span style="color: #c9d1d9;">${data.hostname}</span>
+            `;
+        }
+        
         tooltipEl.style.display = 'block';
         tooltipEl.style.left = (event.clientX + 15) + 'px'; 
         tooltipEl.style.top = (event.clientY + 15) + 'px';
