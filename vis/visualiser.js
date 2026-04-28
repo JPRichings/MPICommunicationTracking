@@ -52,6 +52,15 @@ let uiMediaRecorder = null;
 let uiRecordedChunks = [];
 let uiStream = null;
 
+// Camera and layout controls
+let defaultCameraPose = null;   // set after buildHardwareTopology() auto-frames
+let selectedObject = null;      // last clicked mpiNode/mpiRank
+let isFollowEnabled = false;
+let followOffset = new THREE.Vector3(0, 15, 40);
+
+const nodeOriginalPos = new Map();
+let currentLayoutMode = "blueprint";
+
 // ==========================================
 // CONFIGURATION & CATEGORIES
 // ==========================================
@@ -191,6 +200,8 @@ function animateThreeJS() {
             }
         });
     }
+
+    updateFollowCamera();
 
     renderer.render(scene, camera);
 }
@@ -433,6 +444,152 @@ function initTooltip() {
     document.body.appendChild(tooltipEl);
 }
 
+// =========================================
+// CAMERA FUNCTIONS
+// =========================================
+function getCameraPose() {
+  return {
+    position: camera.position.clone(),
+    target: controls.target.clone(),
+    up: camera.up.clone()
+  };
+}
+
+function setCameraPose(pose) {
+  if (pose.up) camera.up.copy(pose.up);
+  camera.position.copy(pose.position);
+  controls.target.copy(pose.target);
+  controls.update();
+}
+
+function animateCameraPose(toPose, duration = 650) {
+  const from = getCameraPose();
+  const start = performance.now();
+
+  function step(t) {
+    const u = Math.min(1, (t - start) / duration);
+    const ease = 1 - Math.pow(1 - u, 3);
+
+    camera.position.lerpVectors(from.position, toPose.position, ease);
+    controls.target.lerpVectors(from.target, toPose.target, ease);
+
+    if (toPose.up) {
+      // simple lerp + renormalize
+      const up = from.up.clone().lerp(toPose.up, ease).normalize();
+      camera.up.copy(up);
+    }
+
+    controls.update();
+    if (u < 1) requestAnimationFrame(step);
+  }
+
+  requestAnimationFrame(step);
+}
+
+function computeTopologyBounds() {
+  const box = new THREE.Box3();
+  let hasAny = false;
+
+  nodeMap.forEach(group => {
+    box.expandByObject(group);
+    hasAny = true;
+  });
+
+  if (!hasAny) {
+    // fallback
+    box.min.set(-1, -1, -1);
+    box.max.set(1, 1, 1);
+  }
+  return box;
+}
+
+function viewPreset(name) {
+  const box = computeTopologyBounds();
+  const center = new THREE.Vector3();
+  const size = new THREE.Vector3();
+  box.getCenter(center);
+  box.getSize(size);
+
+  const radius = Math.max(size.length() * 0.5, 10);
+  const dist = radius * 2.2;
+
+  const pose = { target: center, position: new THREE.Vector3(), up: new THREE.Vector3(0,1,0) };
+
+  if (name === "iso") {
+    pose.position.copy(center).add(new THREE.Vector3(1, 0.7, 1).normalize().multiplyScalar(dist));
+    pose.up.set(0, 1, 0);
+  } else if (name === "top") {
+    // look down -Y; set up to -Z so the view doesn't roll weirdly
+    pose.position.copy(center).add(new THREE.Vector3(0, 1, 0).multiplyScalar(dist));
+    pose.up.set(0, 0, -1);
+  } else if (name === "front") {
+    pose.position.copy(center).add(new THREE.Vector3(0, 0.2, 1).normalize().multiplyScalar(dist));
+    pose.up.set(0, 1, 0);
+  } else if (name === "side") {
+    pose.position.copy(center).add(new THREE.Vector3(1, 0.2, 0).normalize().multiplyScalar(dist));
+    pose.up.set(0, 1, 0);
+  }
+
+  animateCameraPose(pose, 650);
+}
+
+function cacheDefaultCameraPose() {
+  defaultCameraPose = getCameraPose();
+}
+
+function resetView() {
+  if (!defaultCameraPose) return;
+  animateCameraPose(defaultCameraPose, 650);
+}
+
+function setSelectedObject(obj) {
+  selectedObject = obj || null;
+
+  const status = document.getElementById("camStatus");
+  if (!status) return;
+
+  if (!selectedObject) {
+    status.textContent = "";
+    return;
+  }
+
+  // If we clicked a rank mesh, show its rank id if we can infer it (optional)
+  // (You could attach rank id in userData when creating the mesh.)
+  status.textContent = `Selected: ${selectedObject.name}`;
+}
+
+function setFollowEnabled(enabled) {
+  isFollowEnabled = !!enabled;
+
+  // "Follow" is much nicer if we lock orbit controls;
+  // otherwise user input fights the follow target updates.
+  controls.enabled = !isFollowEnabled;
+
+  if (isFollowEnabled) {
+    // store offset from target to camera at activation time
+    followOffset.copy(camera.position).sub(controls.target);
+  }
+}
+
+function updateFollowCamera() {
+  if (!isFollowEnabled || !selectedObject) return;
+
+  const targetPos = new THREE.Vector3();
+  selectedObject.getWorldPosition(targetPos);
+
+  // Smoothly chase the target
+  controls.target.lerp(targetPos, 0.18);
+
+  // Keep constant offset
+  const desiredCam = controls.target.clone().add(followOffset);
+  camera.position.lerp(desiredCam, 0.18);
+
+  controls.update();
+}
+
+// ================================
+// HARDWARE TOPOLOGY
+// ================================
 function buildHardwareTopology() {
     const nodesMap = {};
     const groupBoxes = []; // Stores our dynamic Blade and Chassis wireframe boundaries

@@ -46,6 +46,48 @@
         </div>
 </div>
 
+   <div class="control-group" style="margin-top: 20px;">
+  <h3>Camera & Layout</h3>
+
+  <div style="display:flex; gap:8px; flex-wrap:wrap;">
+    <button id="btn-view-iso">Iso</button>
+    <button id="btn-view-top">Top</button>
+    <button id="btn-view-front">Front</button>
+    <button id="btn-view-side">Side</button>
+    <button id="btn-view-reset">Reset</button>
+  </div>
+
+  <div style="margin-top:10px;">
+    <label style="font-size:0.85rem; color:#8b949e;">
+      <input type="checkbox" id="chk-follow" />
+      Follow selected (locks controls)
+    </label>
+  </div>
+
+  <div style="margin-top:10px;">
+    <label style="font-size:0.85rem; color:#8b949e;">Layout</label>
+    <select id="layoutMode" style="width:100%;">
+      <option value="blueprint" selected>3D (Blueprint)</option>
+      <option value="topdown">Top-down</option>
+      <option value="rackfront">Rack-front (Y vs X)</option>
+      <option value="line">Line (debug)</option>
+    </select>
+  </div>
+
+  <div style="margin-top:12px; display:grid; grid-template-columns: 1fr auto; gap:8px;">
+    <input id="viewName" placeholder="view name" />
+    <button id="btn-view-save">Save</button>
+  </div>
+
+  <div style="margin-top:8px; display:grid; grid-template-columns: 1fr auto auto; gap:8px;">
+    <select id="savedViews" style="width:100%;"></select>
+    <button id="btn-view-load">Load</button>
+    <button id="btn-view-del">Del</button>
+  </div>
+
+  <div id="camStatus" style="margin-top:8px; font-size:0.8rem; color:#8b949e;"></div>
+</div>
+
 <div style="margin-top: 20px;">
     <h3 style="font-size: 0.75rem; color: #3fb950; font-weight: 600; margin-bottom: 10px; letter-spacing: 0.5px;">Current Message Stats</h3>
     <div id="activeStatsContainer">
