@@ -31,6 +31,12 @@ extern "C" {
 #define MPI_GATHER_TYPE     30
 #define MPI_SCATTER_TYPE    31
 #define MPI_ALLGATHER_TYPE  32
+#define MPI_WAITANY_TYPE    33
+#define MPI_WAITSOME_TYPE   34
+#define MPI_TEST_TYPE       35
+#define MPI_TESTANY_TYPE    36
+#define MPI_TESTALL_TYPE    37
+#define MPI_TESTSOME_TYPE   38
 
 typedef struct small_node {
     double time;

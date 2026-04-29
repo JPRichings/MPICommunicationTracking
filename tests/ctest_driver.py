@@ -31,6 +31,12 @@ MPI_ALLREDUCE_TYPE = 29
 MPI_GATHER_TYPE = 30
 MPI_SCATTER_TYPE = 31
 MPI_ALLGATHER_TYPE = 32
+MPI_WAITANY_TYPE = 33
+MPI_WAITSOME_TYPE = 34
+MPI_TEST_TYPE = 35
+MPI_TESTANY_TYPE = 36
+MPI_TESTALL_TYPE = 37
+MPI_TESTSOME_TYPE = 38
 
 
 def run(cmd, cwd=None, env=None):
@@ -317,6 +323,300 @@ def validate_nonblocking(trace):
     )
 
 
+def validate_nonblocking_any_source_wait(trace):
+    require(trace["world_size"] == 3, "nonblocking_any_source_wait: world size should be 3")
+
+    rank0 = trace["sections"][0]
+    rank1 = trace["sections"][1]
+    rank2 = trace["sections"][2]
+
+    require_one(
+        rank0["small"],
+        message_type=MPI_IRECV_TYPE,
+        sender=1,
+        receiver=0,
+        count=1,
+        bytes=4,
+    )
+
+    require_one(
+        rank0["small"],
+        message_type=MPI_WAIT_TYPE,
+        sender=0,
+        receiver=0,
+        count=1,
+        bytes=0,
+    )
+
+    require_one(
+        rank1["small"],
+        message_type=MPI_SEND_TYPE,
+        sender=1,
+        receiver=0,
+        count=1,
+        bytes=4,
+    )
+
+    require_one(
+        rank2["small"],
+        message_type=MPI_SEND_TYPE,
+        sender=2,
+        receiver=0,
+        count=1,
+        bytes=4,
+    )
+
+
+def validate_waitany(trace):
+    require(trace["world_size"] == 2, "waitany: world size should be 2")
+
+    rank0 = trace["sections"][0]
+    rank1 = trace["sections"][1]
+
+    require_n(
+        rank0["small"],
+        2,
+        message_type=MPI_SEND_TYPE,
+        sender=0,
+        receiver=1,
+        count=1,
+        bytes=4,
+    )
+
+    require_n(
+        rank1["small"],
+        2,
+        message_type=MPI_IRECV_TYPE,
+        sender=0,
+        receiver=1,
+        count=1,
+        bytes=4,
+    )
+
+    require_one(
+        rank1["small"],
+        message_type=MPI_WAITANY_TYPE,
+        sender=1,
+        receiver=1,
+        count=1,
+        bytes=0,
+    )
+
+    require_one(
+        rank1["small"],
+        message_type=MPI_WAIT_TYPE,
+        sender=1,
+        receiver=1,
+        count=1,
+        bytes=0,
+    )
+
+
+def validate_waitsome(trace):
+    require(trace["world_size"] == 2, "waitsome: world size should be 2")
+
+    rank0 = trace["sections"][0]
+    rank1 = trace["sections"][1]
+
+    require_n(
+        rank0["small"],
+        3,
+        message_type=MPI_SEND_TYPE,
+        sender=0,
+        receiver=1,
+        count=1,
+        bytes=4,
+    )
+
+    require_n(
+        rank1["small"],
+        3,
+        message_type=MPI_IRECV_TYPE,
+        sender=0,
+        receiver=1,
+        count=1,
+        bytes=4,
+    )
+
+    require_one(
+        rank1["small"],
+        message_type=MPI_WAITSOME_TYPE,
+        sender=1,
+        receiver=1,
+        count=1,
+        bytes=0,
+    )
+
+    require_one(
+        rank1["small"],
+        message_type=MPI_WAITALL_TYPE,
+        sender=1,
+        receiver=1,
+        count=2,
+        bytes=0,
+    )
+
+
+def validate_test_single(trace):
+    require(trace["world_size"] == 2, "test_single: world size should be 2")
+
+    rank0 = trace["sections"][0]
+    rank1 = trace["sections"][1]
+
+    require_one(
+        rank0["small"],
+        message_type=MPI_SEND_TYPE,
+        sender=0,
+        receiver=1,
+        count=1,
+        bytes=4,
+    )
+
+    require_one(
+        rank1["small"],
+        message_type=MPI_IRECV_TYPE,
+        sender=0,
+        receiver=1,
+        count=1,
+        bytes=4,
+    )
+
+    require_one(
+        rank1["small"],
+        message_type=MPI_TEST_TYPE,
+        sender=1,
+        receiver=1,
+        count=1,
+        bytes=0,
+    )
+
+
+def validate_testall(trace):
+    require(trace["world_size"] == 2, "testall: world size should be 2")
+
+    rank0 = trace["sections"][0]
+    rank1 = trace["sections"][1]
+
+    require_n(
+        rank0["small"],
+        2,
+        message_type=MPI_SEND_TYPE,
+        sender=0,
+        receiver=1,
+        count=1,
+        bytes=4,
+    )
+
+    require_n(
+        rank1["small"],
+        2,
+        message_type=MPI_IRECV_TYPE,
+        sender=0,
+        receiver=1,
+        count=1,
+        bytes=4,
+    )
+
+    require_one(
+        rank1["small"],
+        message_type=MPI_TESTALL_TYPE,
+        sender=1,
+        receiver=1,
+        count=2,
+        bytes=0,
+    )
+
+
+def validate_testany(trace):
+    require(trace["world_size"] == 2, "testany: world size should be 2")
+
+    rank0 = trace["sections"][0]
+    rank1 = trace["sections"][1]
+
+    require_n(
+        rank0["small"],
+        2,
+        message_type=MPI_SEND_TYPE,
+        sender=0,
+        receiver=1,
+        count=1,
+        bytes=4,
+    )
+
+    require_n(
+        rank1["small"],
+        2,
+        message_type=MPI_IRECV_TYPE,
+        sender=0,
+        receiver=1,
+        count=1,
+        bytes=4,
+    )
+
+    require_one(
+        rank1["small"],
+        message_type=MPI_TESTANY_TYPE,
+        sender=1,
+        receiver=1,
+        count=1,
+        bytes=0,
+    )
+
+    require_one(
+        rank1["small"],
+        message_type=MPI_WAIT_TYPE,
+        sender=1,
+        receiver=1,
+        count=1,
+        bytes=0,
+    )
+
+
+def validate_testsome(trace):
+    require(trace["world_size"] == 2, "testsome: world size should be 2")
+
+    rank0 = trace["sections"][0]
+    rank1 = trace["sections"][1]
+
+    require_n(
+        rank0["small"],
+        3,
+        message_type=MPI_SEND_TYPE,
+        sender=0,
+        receiver=1,
+        count=1,
+        bytes=4,
+    )
+
+    require_n(
+        rank1["small"],
+        3,
+        message_type=MPI_IRECV_TYPE,
+        sender=0,
+        receiver=1,
+        count=1,
+        bytes=4,
+    )
+
+    require_one(
+        rank1["small"],
+        message_type=MPI_TESTSOME_TYPE,
+        sender=1,
+        receiver=1,
+        count=1,
+        bytes=0,
+    )
+
+    require_one(
+        rank1["small"],
+        message_type=MPI_WAITALL_TYPE,
+        sender=1,
+        receiver=1,
+        count=2,
+        bytes=0,
+    )
+
+
 VALIDATORS = {
     "send_recv": validate_send_recv,
     "any_source": validate_any_source,
@@ -324,6 +624,13 @@ VALIDATORS = {
     "subcomm_send": validate_subcomm_send,
     "collectives": validate_collectives,
     "nonblocking": validate_nonblocking,
+    "nonblocking_any_source_wait": validate_nonblocking_any_source_wait,
+    "waitany": validate_waitany,
+    "waitsome": validate_waitsome,
+    "test_single": validate_test_single,
+    "testall": validate_testall,
+    "testany": validate_testany,
+    "testsome": validate_testsome,
 }
 
 

@@ -136,6 +136,13 @@ add_mpi_trace_case(sendrecv      test_sendrecv.c      2)
 add_mpi_trace_case(subcomm_send  test_subcomm_send.c  4)
 add_mpi_trace_case(collectives   test_collectives.c   4)
 add_mpi_trace_case(nonblocking   test_nonblocking.c   2)
+add_mpi_trace_case(nonblocking_any_source_wait test_nonblocking_any_source_wait.c 3)
+add_mpi_trace_case(waitany                     test_waitany.c                     2)
+add_mpi_trace_case(waitsome                    test_waitsome.c                    2)
+add_mpi_trace_case(test_single                 test_test.c                        2)
+add_mpi_trace_case(testall                     test_testall.c                     2)
+add_mpi_trace_case(testany                     test_testany.c                     2)
+add_mpi_trace_case(testsome                    test_testsome.c                    2)
 
 # -----------------------------------------------------------------------------
 # Convenience target
@@ -151,6 +158,13 @@ add_custom_target(check-mpi-trace
         mpi_trace_case_subcomm_send
         mpi_trace_case_collectives
         mpi_trace_case_nonblocking
+        mpi_trace_case_nonblocking_any_source_wait
+        mpi_trace_case_waitany
+        mpi_trace_case_waitsome
+        mpi_trace_case_test_single
+        mpi_trace_case_testall
+        mpi_trace_case_testany
+        mpi_trace_case_testsome
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     USES_TERMINAL
 )
