@@ -248,34 +248,28 @@ function initSharedMaterials() {
         
         sharedMaterials[call + "_line"] = new THREE.LineBasicMaterial({
             color: cat.color,
-            transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false 
+            transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, 
+            depthWrite: false, depthTest: false
         });
 
-        // NEW: Translucent glowing material specifically for the 3D Tubes
-        sharedMaterials[call + "_tube"] = new THREE.MeshBasicMaterial({
-            color: cat.color,
-            transparent: true, 
-            opacity: 0.25, // Soft opacity so massive overlaps glow brightly
-            blending: THREE.AdditiveBlending, 
-            depthWrite: false 
+        sharedMaterials[call + "_tube"] = new THREE.MeshLambertMaterial({
+            color: cat.color
         });
         
-        sharedMaterials[call + "_junction"] = new THREE.MeshBasicMaterial({
-            color: cat.color,
-            transparent: true,
-            opacity: 0.8 // Slight transparency so clusters don't form solid walls
+        sharedMaterials[call + "_junction"] = new THREE.MeshLambertMaterial({
+            color: cat.color
         });
     });
 
     // Build the fallback defaults
     sharedMaterials["default_line"] = new THREE.LineBasicMaterial({
-        color: DEFAULT_CATEGORY.color, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false
+        color: DEFAULT_CATEGORY.color, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false
     });
-    sharedMaterials["default_tube"] = new THREE.MeshBasicMaterial({ 
-        color: DEFAULT_CATEGORY.color, transparent: true, opacity: 0.25, blending: THREE.AdditiveBlending, depthWrite: false 
+    sharedMaterials["default_tube"] = new THREE.MeshLambertMaterial({ 
+        color: DEFAULT_CATEGORY.color 
     });
-    sharedMaterials["default_junction"] = new THREE.MeshBasicMaterial({ 
-        color: DEFAULT_CATEGORY.color, transparent: true, opacity: 0.8
+    sharedMaterials["default_junction"] = new THREE.MeshLambertMaterial({ 
+        color: DEFAULT_CATEGORY.color 
     });
 }
 
@@ -1328,9 +1322,9 @@ function renderActiveCommunications() {
             else right = mid - 1;
         }
         
-        const MAX_VISIBLE_MESSAGES = 400;
+        const MAX_VISIBLE_MESSAGES = 800; 
         let eventsCaptured = 0;
-	
+ 
         for (let i = right; i >= 0; i--) {
             if (timeline[i].time >= minTimeWindow) {
                 activeEvents.push(timeline[i]);
@@ -1340,14 +1334,15 @@ function renderActiveCommunications() {
         } 
     }
 
-    const drawnCollectiveLines = new Set();
+    // Aggregate connections to prevent visual blowout and visualize volume
+    const aggregatedConnections = new Map();
 
     activeEvents.forEach(event => {
         const cat = MPI_CATEGORIES[event.call] || DEFAULT_CATEGORY;
-
         const sData = rankMap.get(event.sender);
         const rData = rankMap.get(event.receiver);
 
+        // Lighting Logic
         if (event.call !== "MPI_WAIT" && event.call !== "MPI_WAITALL") {
             const color = new THREE.Color(cat.color);
             if (sData) {
@@ -1364,51 +1359,68 @@ function renderActiveCommunications() {
 
         if (event.sender === event.receiver) return;
 
+        // Grouping Logic
+        // For collectives, group by chassis to avoid drawing 64 lines for one node.
+        // For P2P, group by sender, receiver, AND call type.
+        let connectionKey;
+        if (cat.type === "collective" && sData && rData) {
+           connectionKey = `coll-${sData.nodeGroup.uuid}-${rData.nodeGroup.uuid}-${event.call}`;
+        } else {
+           connectionKey = `${event.sender}-${event.receiver}-${event.call}`;
+        }
+
+        if (!aggregatedConnections.has(connectionKey)) {
+            aggregatedConnections.set(connectionKey, {
+                sender: event.sender, receiver: event.receiver, call: event.call,
+                count: 1, sData: sData, rData: rData
+            });
+        } else {
+            // If the connection already exists this frame, just increment the volume
+            aggregatedConnections.get(connectionKey).count++;
+        }
+    });
+
+    // Draw the aggregated lines
+    aggregatedConnections.forEach(conn => {
+        const { sender, receiver, call, count, sData, rData } = conn;
+        const cat = MPI_CATEGORIES[call] || DEFAULT_CATEGORY;
+
         if (sData && rData) {
             if (sData.nodeGroup === rData.nodeGroup) {
                 const startWorld = sData.localPos.clone().applyMatrix4(sData.nodeGroup.matrixWorld);
                 const endWorld = rData.localPos.clone().applyMatrix4(rData.nodeGroup.matrixWorld);
-                
-                startWorld.z += (sData.depth / 2) + 0.5;
-                endWorld.z += (rData.depth / 2) + 0.5;
-
-                drawIntraNodeLine(startWorld, endWorld, event.call);
+                startWorld.z += (sData.depth / 2) + 0.5; endWorld.z += (rData.depth / 2) + 0.5;
+                drawIntraNodeLine(startWorld, endWorld, call, count);
             } else {
                 if (cat.type === "collective") {
                     const startWorld = sData.nodeGroup.position.clone();
                     const endWorld = rData.nodeGroup.position.clone();
                     startWorld.z += 5.5; endWorld.z += 5.5;
-                    
-                    // PREVENT BLOWOUT: Create a unique string for this path and check if we already drew it
-                    const lineKey = `${event.call}-${sData.nodeGroup.uuid}-${rData.nodeGroup.uuid}`;
-                    if (!drawnCollectiveLines.has(lineKey)) {
-                        drawInterNodeLine(startWorld, endWorld, event.call, event.sender, event.receiver);
-                        drawnCollectiveLines.add(lineKey);
-                    }
-                    
+                    drawInterNodeLine(startWorld, endWorld, call, sender, receiver, count);
                 } else {
                     const startWorld = sData.localPos.clone().applyMatrix4(sData.nodeGroup.matrixWorld);
                     const endWorld = rData.localPos.clone().applyMatrix4(rData.nodeGroup.matrixWorld);
-                    
-                    startWorld.z += (sData.depth / 2) + 0.5;
-                    endWorld.z += (rData.depth / 2) + 0.5;
-                    drawInterNodeLine(startWorld, endWorld, event.call, event.sender, event.receiver);
+                    startWorld.z += (sData.depth / 2) + 0.5; endWorld.z += (rData.depth / 2) + 0.5;
+                    drawInterNodeLine(startWorld, endWorld, call, sender, receiver, count);
                 }
             }
-        } 
+        }
     });
 
     return activeEvents;
 }
 
-function drawIntraNodeLine(startPos, endPos, callName) {
+function drawIntraNodeLine(startPos, endPos, callName, msgCount = 1) {
     const midPoint = startPos.clone().lerp(endPos, 0.5);
     const distance = startPos.distanceTo(endPos);
     midPoint.z += Math.max(distance * 0.4, 1.0); 
 
+    // Scale thickness based on volume of messages
+    const thicknessMultiplier = 1 + Math.log10(msgCount);
+    const radius = 0.04 * thicknessMultiplier;
+
     const curve = new THREE.QuadraticBezierCurve3(startPos, midPoint, endPos);
-    const geometry = new THREE.TubeGeometry(curve, 10, 0.04, 4, false);
-    
+    const geometry = new THREE.TubeGeometry(curve, 10, radius, 4, false);
     const material = sharedMaterials[callName + "_tube"] || sharedMaterials["default_tube"];
 
     const tube = new THREE.Mesh(geometry, material);
@@ -1416,35 +1428,35 @@ function drawIntraNodeLine(startPos, endPos, callName) {
     scene.add(tube);
     activeLines.push(tube);
 
-    createJunctionPoint(startPos, callName);
+    createJunctionPoint(startPos, callName, thicknessMultiplier);
     const tangent = curve.getTangent(1.0).normalize();
-    createArrowhead(endPos, tangent, callName);
+    createArrowhead(endPos, tangent, callName, thicknessMultiplier);
 }
 
-function drawInterNodeLine(startPos, endPos, callName, sender, receiver) {
+function drawInterNodeLine(startPos, endPos, callName, sender, receiver, msgCount = 1) {
     const cat = MPI_CATEGORIES[callName] || DEFAULT_CATEGORY;
 
     const midPoint = startPos.clone().lerp(endPos, 0.5);
     const distance = startPos.distanceTo(endPos);
-    
     const bowDistance = Math.max(distance * 0.3, 8.0); 
     const laneOffset = (sender > receiver) ? 3.0 : -3.0;
 
-    // Force all lines to bulge outwards (positive Z) toward the camera
-    // Use the Y axis to vertically separate the traffic lanes
     if (cat.type === "collective") {
-        midPoint.z += bowDistance * 1.5; // Collectives bow out the furthest
+        midPoint.z += bowDistance * 1.5; 
     } else if (cat.type === "p2p_nonblock") {
         midPoint.z += bowDistance; 
-        midPoint.y += laneOffset; // Shift up/down to avoid collisions
+        midPoint.y += laneOffset; 
     } else {
         midPoint.z += bowDistance; 
         midPoint.y -= laneOffset;
     }
 
+    // Scale thickness based on volume of messages
+    const thicknessMultiplier = 1 + Math.log10(msgCount);
+    const radius = 0.12 * thicknessMultiplier;
+
     const curve = new THREE.QuadraticBezierCurve3(startPos, midPoint, endPos);
-    
-    const geometry = new THREE.TubeGeometry(curve, 12, 0.12, 4, false);
+    const geometry = new THREE.TubeGeometry(curve, 12, radius, 4, false);
     const material = sharedMaterials[callName + "_tube"] || sharedMaterials["default_tube"];
 
     const tube = new THREE.Mesh(geometry, material);
@@ -1452,25 +1464,33 @@ function drawInterNodeLine(startPos, endPos, callName, sender, receiver) {
     scene.add(tube);
     activeLines.push(tube);
 
-    createJunctionPoint(startPos, callName);
+    createJunctionPoint(startPos, callName, thicknessMultiplier);
     const tangent = curve.getTangent(1.0).normalize();
-    createArrowhead(endPos, tangent, callName);
+    createArrowhead(endPos, tangent, callName, thicknessMultiplier);
 }
 
-function createJunctionPoint(pos, callName) {
+function createJunctionPoint(pos, callName, thicknessMultiplier = 1) {
     const mat = sharedMaterials[callName + "_junction"] || sharedMaterials["default_junction"];
     const mesh = new THREE.Mesh(sharedSphereGeo, mat);
     mesh.position.copy(pos);
+    
+    // Scale the sphere so it doesn't get swallowed by thick tubes
+    mesh.scale.set(thicknessMultiplier, thicknessMultiplier, thicknessMultiplier);
+    
     scene.add(mesh);
     junctionPoints.push(mesh);
 }
 
-function createArrowhead(pos, direction, callName) {
+function createArrowhead(pos, direction, callName, thicknessMultiplier = 1) {
     const mat = sharedMaterials[callName + "_junction"] || sharedMaterials["default_junction"];
     const mesh = new THREE.Mesh(sharedArrowGeo, mat);
     mesh.position.copy(pos);
     const target = pos.clone().add(direction);
     mesh.lookAt(target);
+    
+    // Scale the arrowhead so it doesn't get swallowed by thick tubes
+    mesh.scale.set(thicknessMultiplier, thicknessMultiplier, thicknessMultiplier);
+    
     scene.add(mesh);
     junctionPoints.push(mesh); 
 }
