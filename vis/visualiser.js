@@ -28,20 +28,23 @@ const mouse = new THREE.Vector2();
 
 // 3D Maps & Caches
 const nodeMap = new Map();  // Maps hostname -> Node Group
-const rankMap = new Map();  // Maps rank ID -> Process Mesh
+const rankMap = new Map();  // Maps rank ID -> Instance Data
 let activeLines = [];       // Currently rendered bezier curves
 let junctionPoints = [];    // Active receive/send ports
 let dynamicCells = {};      // HTML Table cell references
 
 const rankToNodeGroup = new Map();
 
+// Lighting State
+const activelyGlowingRanks = new Map(); // rankId -> { mesh, instanceId, color, intensity }
+const defaultRankColor = new THREE.Color(0x4b5563);
+
 // Memory Caches
 const sharedMaterials = {};
-const sharedSphereGeo = new THREE.SphereGeometry(0.2, 8, 8);
+const sharedSphereGeo = new THREE.SphereGeometry(0.04, 8, 8);
 
-// Creating glyph for communication direction
-const sharedArrowGeo = new THREE.ConeGeometry(0.25, 0.8, 8);
-sharedArrowGeo.translate(0, -0.4, 0);
+const sharedArrowGeo = new THREE.ConeGeometry(0.08, 0.25, 8);
+sharedArrowGeo.translate(0, -0.125, 0); // Center the pivot at the tip
 sharedArrowGeo.rotateX(Math.PI / 2);
 
 // 3d hover tooltips
@@ -117,12 +120,12 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     document.getElementById("btn-play").addEventListener("click", togglePlayback);
-   
+    
     document.getElementById("btn-rec-ui-start")?.addEventListener("click", () => {
-      startUIRecording({ fps: 60, bitsPerSecond: 8_000_000 }).catch(err => {
-      console.error(err);
-        alert("Failed to start UI recording. See console for details.");
-      });
+	startUIRecording({ fps: 60, bitsPerSecond: 8_000_000 }).catch(err => {
+	    console.error(err);
+            alert("Failed to start UI recording. See console for details.");
+	});
     });
 
     document.getElementById("btn-rec-ui-stop")?.addEventListener("click", stopUIRecording);
@@ -136,12 +139,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Follow selection
     document.getElementById("chk-follow")?.addEventListener("change", (e) => {
-      setFollowEnabled(e.target.checked);
+	setFollowEnabled(e.target.checked);
     });
 
     // Layout switch
     document.getElementById("layoutMode")?.addEventListener("change", (e) => {
-      applyLayout(e.target.value);
+	applyLayout(e.target.value);
     });
 
     // Saved views
@@ -152,16 +155,16 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 window.addEventListener("resize", () => {
-  const container = document.getElementById("visCanvas");
-  if (!container || !camera || !renderer) return;
+    const container = document.getElementById("visCanvas");
+    if (!container || !camera || !renderer) return;
 
-  const w = container.clientWidth;
-  const h = container.clientHeight;
-  if (w <= 0 || h <= 0) return;
+    const w = container.clientWidth;
+    const h = container.clientHeight;
+    if (w <= 0 || h <= 0) return;
 
-  camera.aspect = w / h;
-  camera.updateProjectionMatrix();
-  renderer.setSize(w, h);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    renderer.setSize(w, h);
 });
 
 function initThreeJS() {
@@ -220,12 +223,18 @@ function animateThreeJS() {
         controls.update();
     }
 
-    if (isPlaying) {
-        rankMap.forEach(mesh => {
-            if (mesh.material.emissiveIntensity > 0) {
-                mesh.material.emissiveIntensity -= 0.02;
-                if (mesh.material.emissiveIntensity < 0) mesh.material.emissiveIntensity = 0;
+    // Fading logic for actively glowing instanced meshes
+    if (isPlaying && activelyGlowingRanks.size > 0) {
+        activelyGlowingRanks.forEach((state, rankId) => {
+            state.intensity -= 0.02;
+            if (state.intensity <= 0) {
+                state.mesh.setColorAt(state.instanceId, defaultRankColor);
+                activelyGlowingRanks.delete(rankId);
+            } else {
+                const c = defaultRankColor.clone().lerp(state.color, state.intensity);
+                state.mesh.setColorAt(state.instanceId, c);
             }
+            state.mesh.instanceColor.needsUpdate = true;
         });
     }
 
@@ -239,23 +248,35 @@ function initSharedMaterials() {
         
         sharedMaterials[call + "_line"] = new THREE.LineBasicMaterial({
             color: cat.color,
-            transparent: true,
-            opacity: 0.5,
-            blending: THREE.AdditiveBlending,
+            transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false 
+        });
+
+        // NEW: Translucent glowing material specifically for the 3D Tubes
+        sharedMaterials[call + "_tube"] = new THREE.MeshBasicMaterial({
+            color: cat.color,
+            transparent: true, 
+            opacity: 0.25, // Soft opacity so massive overlaps glow brightly
+            blending: THREE.AdditiveBlending, 
             depthWrite: false 
         });
         
         sharedMaterials[call + "_junction"] = new THREE.MeshBasicMaterial({
-            color: cat.color
+            color: cat.color,
+            transparent: true,
+            opacity: 0.8 // Slight transparency so clusters don't form solid walls
         });
     });
 
     // Build the fallback defaults
     sharedMaterials["default_line"] = new THREE.LineBasicMaterial({
-        color: DEFAULT_CATEGORY.color,
-        transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false
+        color: DEFAULT_CATEGORY.color, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false
     });
-    sharedMaterials["default_junction"] = new THREE.MeshBasicMaterial({ color: DEFAULT_CATEGORY.color });
+    sharedMaterials["default_tube"] = new THREE.MeshBasicMaterial({ 
+        color: DEFAULT_CATEGORY.color, transparent: true, opacity: 0.25, blending: THREE.AdditiveBlending, depthWrite: false 
+    });
+    sharedMaterials["default_junction"] = new THREE.MeshBasicMaterial({ 
+        color: DEFAULT_CATEGORY.color, transparent: true, opacity: 0.8
+    });
 }
 
 // ==========================================
@@ -281,12 +302,12 @@ async function handleFileUpload(event) {
             const headerText = await decompressBlob(headerBlob);
             
             try {
-    parsedData = JSON.parse(headerText);
-    parsedData.timeline = [];
-} catch (parseError) {
-    alert("Failed to parse the MPI profile data. The file may be corrupted.");
-    return; 
-} 
+                parsedData = JSON.parse(headerText);
+                parsedData.timeline = [];
+            } catch (parseError) {
+                alert("Failed to parse the MPI profile data. The file may be corrupted.");
+                return; 
+            } 
         } else {
             alert("Please upload a packaged .mpix file for large traces.");
             return;
@@ -357,7 +378,7 @@ async function ensureChunkLoadedForTime(time) {
                 console.log(`Loaded Chunk ${targetIndex + 1}/${chunks.length}`);
             } catch (error) {
                 console.error("Error loading chunk:", error);
-                 parsedData.timeline = [];
+                parsedData.timeline = [];
                 throw error; 
             } finally {
                 if (overlay) overlay.style.display = "none";
@@ -379,56 +400,56 @@ async function ensureChunkLoadedForTime(time) {
 // TOPOLOGY & HARDWARE
 // ==========================================
 function collectDisposableResources(root, geoms, mats) {
-  root.traverse(obj => {
-    if (obj.geometry) geoms.add(obj.geometry);
-    if (obj.material) {
-      if (Array.isArray(obj.material)) obj.material.forEach(m => mats.add(m));
-      else mats.add(obj.material);
-    }
-  });
+    root.traverse(obj => {
+	if (obj.geometry) geoms.add(obj.geometry);
+	if (obj.material) {
+	    if (Array.isArray(obj.material)) obj.material.forEach(m => mats.add(m));
+	    else mats.add(obj.material);
+	}
+    });
 }
 
 function clearTopologyScene() {
-  const geoms = new Set();
-  const mats = new Set();
+    const geoms = new Set();
+    const mats = new Set();
 
-  nodeMap.forEach(group => {
-    collectDisposableResources(group, geoms, mats);
-    scene.remove(group);
-  });
-  nodeMap.clear();
-  rankMap.clear();
+    nodeMap.forEach(group => {
+	collectDisposableResources(group, geoms, mats);
+	scene.remove(group);
+    });
+    nodeMap.clear();
+    rankMap.clear();
+    activelyGlowingRanks.clear();
 
-  const toRemove = [];
-  scene.traverse(obj => { 
-      if (obj.name === "cabinetBox" || obj.name === "groupBox") { 
-          toRemove.push(obj); 
-      } 
-  });
-  
-  toRemove.forEach(obj => {
-    collectDisposableResources(obj, geoms, mats);
-    scene.remove(obj);
-  });
+    const toRemove = [];
+    scene.traverse(obj => { 
+	if (obj.name === "cabinetBox" || obj.name === "groupBox") { 
+            toRemove.push(obj); 
+	} 
+    });
+    
+    toRemove.forEach(obj => {
+	collectDisposableResources(obj, geoms, mats);
+	scene.remove(obj);
+    });
 
-  clearLines();
+    clearLines();
 
-  geoms.forEach(g => g.dispose());
-  mats.forEach(m => m.dispose());
+    geoms.forEach(g => g.dispose());
+    mats.forEach(m => m.dispose());
 
-  nodeOriginalPos.clear();
-setSelectedObject(null);
-setFollowEnabled(false);
+    nodeOriginalPos.clear();
+    setSelectedObject(null);
+    setFollowEnabled(false);
 
-const chk = document.getElementById("chk-follow");
-if (chk) chk.checked = false;
+    const chk = document.getElementById("chk-follow");
+    if (chk) chk.checked = false;
 
-const layoutSel = document.getElementById("layoutMode");
-if (layoutSel) layoutSel.value = "blueprint";
+    const layoutSel = document.getElementById("layoutMode");
+    if (layoutSel) layoutSel.value = "blueprint";
 
-currentLayoutMode = "blueprint";
-defaultCameraPose = null;
-
+    currentLayoutMode = "blueprint";
+    defaultCameraPose = null;
 }
 
 function initDashboard() {
@@ -436,8 +457,7 @@ function initDashboard() {
     pausePlayback();
     clearTopologyScene();
     rankToNodeGroup.clear();   
- 
-    const topology = parsedData.topology;
+    
     const chunks = parsedData.chunks;
     
     minTime = (chunks && chunks.length > 0) ? chunks[0].t_start : 0;
@@ -458,25 +478,23 @@ function initDashboard() {
     renderSpectrogram();
     initDynamicSpectrogram();
     initLegend();
- 
+    
     void seekToTime(minTime).catch(err => {
-      console.error(err);
-      pausePlayback();
+	console.error(err);
+	pausePlayback();
     });
 }
-
-
 
 // ==========================================
 // 3D HOVER TOOLTIPS
 // ==========================================
 function initTooltip() {
-  const existing = document.getElementById("mpiTooltip");
-  if (existing) {
-    tooltipEl = existing;
-    return;
-  }   
- 
+    const existing = document.getElementById("mpiTooltip");
+    if (existing) {
+	tooltipEl = existing;
+	return;
+    }   
+    
     tooltipEl = document.createElement('div');
     tooltipEl.id = "mpiTooltip";
     tooltipEl.style.position = 'absolute';
@@ -498,221 +516,211 @@ function initTooltip() {
 // CAMERA FUNCTIONS
 // =========================================
 function getCameraPose() {
-  return {
-    position: camera.position.clone(),
-    target: controls.target.clone(),
-    up: camera.up.clone()
-  };
+    return {
+	position: camera.position.clone(),
+	target: controls.target.clone(),
+	up: camera.up.clone()
+    };
 }
 
 function setCameraPose(pose) {
-  if (pose.up) camera.up.copy(pose.up);
-  camera.position.copy(pose.position);
-  controls.target.copy(pose.target);
-  controls.update();
+    if (pose.up) camera.up.copy(pose.up);
+    camera.position.copy(pose.position);
+    controls.target.copy(pose.target);
+    controls.update();
 }
 
 function animateCameraPose(toPose, duration = 650) {
-  const from = getCameraPose();
-  const start = performance.now();
+    const from = getCameraPose();
+    const start = performance.now();
 
-  function step(t) {
-    const u = Math.min(1, (t - start) / duration);
-    const ease = 1 - Math.pow(1 - u, 3);
+    function step(t) {
+	const u = Math.min(1, (t - start) / duration);
+	const ease = 1 - Math.pow(1 - u, 3);
 
-    camera.position.lerpVectors(from.position, toPose.position, ease);
-    controls.target.lerpVectors(from.target, toPose.target, ease);
+	camera.position.lerpVectors(from.position, toPose.position, ease);
+	controls.target.lerpVectors(from.target, toPose.target, ease);
 
-    if (toPose.up) {
-      // simple lerp + renormalize
-      const up = from.up.clone().lerp(toPose.up, ease).normalize();
-      camera.up.copy(up);
+	if (toPose.up) {
+	    const up = from.up.clone().lerp(toPose.up, ease).normalize();
+	    camera.up.copy(up);
+	}
+
+	controls.update();
+	if (u < 1) requestAnimationFrame(step);
     }
 
-    controls.update();
-    if (u < 1) requestAnimationFrame(step);
-  }
-
-  requestAnimationFrame(step);
+    requestAnimationFrame(step);
 }
 
 function computeTopologyBounds() {
-  const box = new THREE.Box3();
-  let hasAny = false;
+    const box = new THREE.Box3();
+    let hasAny = false;
 
-  nodeMap.forEach(group => {
-    box.expandByObject(group);
-    hasAny = true;
-  });
+    nodeMap.forEach(group => {
+	box.expandByObject(group);
+	hasAny = true;
+    });
 
-  if (!hasAny) {
-    // fallback
-    box.min.set(-1, -1, -1);
-    box.max.set(1, 1, 1);
-  }
-  return box;
+    if (!hasAny) {
+	box.min.set(-1, -1, -1);
+	box.max.set(1, 1, 1);
+    }
+    return box;
 }
 
 function viewPreset(name) {
-  const box = computeTopologyBounds();
-  const center = new THREE.Vector3();
-  const size = new THREE.Vector3();
-  box.getCenter(center);
-  box.getSize(size);
+    const box = computeTopologyBounds();
+    const center = new THREE.Vector3();
+    const size = new THREE.Vector3();
+    box.getCenter(center);
+    box.getSize(size);
 
-  const radius = Math.max(size.length() * 0.5, 10);
-  const dist = radius * 2.2;
+    const radius = Math.max(size.length() * 0.5, 10);
+    const dist = radius * 2.2;
 
-  const pose = { target: center, position: new THREE.Vector3(), up: new THREE.Vector3(0,1,0) };
+    const pose = { target: center, position: new THREE.Vector3(), up: new THREE.Vector3(0,1,0) };
 
-  if (name === "iso") {
-    pose.position.copy(center).add(new THREE.Vector3(1, 0.7, 1).normalize().multiplyScalar(dist));
-    pose.up.set(0, 1, 0);
-  } else if (name === "top") {
-    // look down -Y; set up to -Z so the view doesn't roll weirdly
-    pose.position.copy(center).add(new THREE.Vector3(0, 1, 0).multiplyScalar(dist));
-    pose.up.set(0, 0, -1);
-  } else if (name === "front") {
-    pose.position.copy(center).add(new THREE.Vector3(0, 0.2, 1).normalize().multiplyScalar(dist));
-    pose.up.set(0, 1, 0);
-  } else if (name === "side") {
-    pose.position.copy(center).add(new THREE.Vector3(1, 0.2, 0).normalize().multiplyScalar(dist));
-    pose.up.set(0, 1, 0);
-  }
+    if (name === "iso") {
+	pose.position.copy(center).add(new THREE.Vector3(1, 0.7, 1).normalize().multiplyScalar(dist));
+	pose.up.set(0, 1, 0);
+    } else if (name === "top") {
+	pose.position.copy(center).add(new THREE.Vector3(0, 1, 0).multiplyScalar(dist));
+	pose.up.set(0, 0, -1);
+    } else if (name === "front") {
+	pose.position.copy(center).add(new THREE.Vector3(0, 0.2, 1).normalize().multiplyScalar(dist));
+	pose.up.set(0, 1, 0);
+    } else if (name === "side") {
+	pose.position.copy(center).add(new THREE.Vector3(1, 0.2, 0).normalize().multiplyScalar(dist));
+	pose.up.set(0, 1, 0);
+    }
 
-  animateCameraPose(pose, 650);
+    animateCameraPose(pose, 650);
 }
 
 function cacheDefaultCameraPose() {
-  defaultCameraPose = getCameraPose();
+    defaultCameraPose = getCameraPose();
 }
 
 function resetView() {
-  if (!defaultCameraPose) return;
-  animateCameraPose(defaultCameraPose, 650);
+    if (!defaultCameraPose) return;
+    animateCameraPose(defaultCameraPose, 650);
 }
 
 function setSelectedObject(obj) {
-  selectedObject = obj || null;
+    selectedObject = obj || null;
 
-  const status = document.getElementById("camStatus");
-  if (!status) return;
+    const status = document.getElementById("camStatus");
+    if (!status) return;
 
-  if (!selectedObject) {
-    status.textContent = "";
-    return;
-  }
+    if (!selectedObject) {
+	status.textContent = "";
+	return;
+    }
 
-  if (selectedObject.userData?.rank !== undefined) {
-    status.textContent = `Selected rank ${selectedObject.userData.rank} @ ${selectedObject.userData.host}`;
-  } else if (selectedObject.userData?.host) {
-    status.textContent = `Selected node ${selectedObject.userData.host}`;
-  } else {
-    status.textContent = `Selected: ${selectedObject.name || "object"}`;
-  }
+    if (selectedObject.userData?.rank !== undefined) {
+	status.textContent = `Selected rank ${selectedObject.userData.rank} @ ${selectedObject.userData.host}`;
+    } else if (selectedObject.userData?.hostname) {
+	status.textContent = `Selected node ${selectedObject.userData.hostname}`;
+    } else {
+	status.textContent = `Selected: ${selectedObject.name || "object"}`;
+    }
 }
 
 function setFollowEnabled(enabled) {
-  isFollowEnabled = !!enabled;
-
-  // "Follow" is much nicer if we lock orbit controls;
-  // otherwise user input fights the follow target updates.
-  controls.enabled = !isFollowEnabled;
-
-  if (isFollowEnabled) {
-    // store offset from target to camera at activation time
-    followOffset.copy(camera.position).sub(controls.target);
-  }
+    isFollowEnabled = !!enabled;
+    controls.enabled = !isFollowEnabled;
+    if (isFollowEnabled) {
+	followOffset.copy(camera.position).sub(controls.target);
+    }
 }
 
 function updateFollowCamera() {
-  if (!isFollowEnabled || !selectedObject) return;
+    if (!isFollowEnabled || !selectedObject) return;
 
-  const targetPos = new THREE.Vector3();
-  selectedObject.getWorldPosition(targetPos);
+    const targetPos = new THREE.Vector3();
+    
+    if (selectedObject.userData && selectedObject.userData.isCore) {
+	// It's a mock object we made for instanced ranks
+	targetPos.copy(selectedObject.worldPos);
+    } else {
+	selectedObject.getWorldPosition(targetPos);
+    }
 
-  // Smoothly chase the target
-  controls.target.lerp(targetPos, 0.18);
+    controls.target.lerp(targetPos, 0.18);
+    desiredCam.copy(controls.target).add(followOffset);
+    camera.position.lerp(desiredCam, 0.18);
 
-  // Keep constant offset
-  camera.position.lerp(desiredCam, 0.18);
-
-  controls.update();
+    controls.update();
 }
 
 function animateNodePositions(targetPositions, duration = 650) {
-  const start = performance.now();
-  const startPositions = new Map();
-
-  nodeMap.forEach((group, hostname) => {
-    startPositions.set(hostname, group.position.clone());
-  });
-
-  function step(t) {
-    const u = Math.min(1, (t - start) / duration);
-    const ease = 1 - Math.pow(1 - u, 3);
+    const start = performance.now();
+    const startPositions = new Map();
 
     nodeMap.forEach((group, hostname) => {
-      const from = startPositions.get(hostname);
-      const to = targetPositions.get(hostname);
-      if (!from || !to) return;
-      group.position.lerpVectors(from, to, ease);
+	startPositions.set(hostname, group.position.clone());
     });
 
-    if (u < 1) requestAnimationFrame(step);
-  }
+    function step(t) {
+	const u = Math.min(1, (t - start) / duration);
+	const ease = 1 - Math.pow(1 - u, 3);
 
-  requestAnimationFrame(step);
+	nodeMap.forEach((group, hostname) => {
+	    const from = startPositions.get(hostname);
+	    const to = targetPositions.get(hostname);
+	    if (!from || !to) return;
+	    group.position.lerpVectors(from, to, ease);
+	});
+
+	if (u < 1) requestAnimationFrame(step);
+    }
+
+    requestAnimationFrame(step);
 }
 
 function applyLayout(mode) {
-  currentLayoutMode = mode;
+    currentLayoutMode = mode;
 
-  const targets = new Map();
-  const hostnames = Array.from(nodeMap.keys());
+    const targets = new Map();
+    const hostnames = Array.from(nodeMap.keys());
 
-  // Precompute extents for some layouts (optional nice spacing)
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
-  hostnames.forEach(h => {
-    const p = nodeOriginalPos.get(h);
-    if (!p) return;
-    minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
-    minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
-    minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z);
-  });
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    hostnames.forEach(h => {
+	const p = nodeOriginalPos.get(h);
+	if (!p) return;
+	minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+	minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+	minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z);
+    });
 
-  hostnames.forEach((hostname, idx) => {
-    const orig = nodeOriginalPos.get(hostname) || new THREE.Vector3();
+    hostnames.forEach((hostname, idx) => {
+	const orig = nodeOriginalPos.get(hostname) || new THREE.Vector3();
 
-    if (mode === "blueprint") {
-      targets.set(hostname, orig.clone());
-    } else if (mode === "topdown") {
-      // Flatten height, keep X/Z
-      targets.set(hostname, new THREE.Vector3(orig.x, 0, orig.z));
-    } else if (mode === "rackfront") {
-      // Show rack slot height as Y, collapse depth
-      targets.set(hostname, new THREE.Vector3(orig.x, orig.y, 0));
-    } else if (mode === "line") {
-      // Debug layout: put nodes in a line
-      targets.set(hostname, new THREE.Vector3((idx - hostnames.length / 2) * 18, 0, 0));
-    }
-  });
+	if (mode === "blueprint") {
+	    targets.set(hostname, orig.clone());
+	} else if (mode === "topdown") {
+	    targets.set(hostname, new THREE.Vector3(orig.x, 0, orig.z));
+	} else if (mode === "rackfront") {
+	    targets.set(hostname, new THREE.Vector3(orig.x, orig.y, 0));
+	} else if (mode === "line") {
+	    targets.set(hostname, new THREE.Vector3((idx - hostnames.length / 2) * 18, 0, 0));
+	}
+    });
 
-  // Optionally hide cabinet box when layout isn't blueprint
-  scene.traverse(obj => {
-  if (obj.name === "cabinetBox" || obj.name === "groupBox") {
-    obj.visible = (mode === "blueprint");
-  }
-});
-  animateNodePositions(targets, 650);
+    scene.traverse(obj => {
+	if (obj.name === "cabinetBox" || obj.name === "groupBox") {
+	    obj.visible = (mode === "blueprint");
+	}
+    });
+    animateNodePositions(targets, 650);
 
-  // Reframe camera nicely for the mode
-  setTimeout(() => {
-    if (mode === "topdown") viewPreset("top");
-    else if (mode === "rackfront") viewPreset("front");
-    else if (mode === "line") viewPreset("front");
-    else resetView();
-  }, 680);
+    setTimeout(() => {
+	if (mode === "topdown") viewPreset("top");
+	else if (mode === "rackfront") viewPreset("front");
+	else if (mode === "line") viewPreset("front");
+	else resetView();
+    }, 680);
 }
 
 
@@ -722,103 +730,101 @@ function applyLayout(mode) {
 const VIEWS_KEY = "mpiVis.savedViews.v1";
 
 function readViews() {
-  try { return JSON.parse(localStorage.getItem(VIEWS_KEY) || "{}"); }
-  catch { return {}; }
+    try { return JSON.parse(localStorage.getItem(VIEWS_KEY) || "{}"); }
+    catch { return {}; }
 }
 
 function writeViews(views) {
-  localStorage.setItem(VIEWS_KEY, JSON.stringify(views));
+    localStorage.setItem(VIEWS_KEY, JSON.stringify(views));
 }
 
 function initSavedViewsUI() {
-  const sel = document.getElementById("savedViews");
-  if (!sel) return;
+    const sel = document.getElementById("savedViews");
+    if (!sel) return;
 
-  sel.innerHTML = "";
-  const views = readViews();
-  const names = Object.keys(views).sort();
+    sel.innerHTML = "";
+    const views = readViews();
+    const names = Object.keys(views).sort();
 
-  if (names.length === 0) {
-    const opt = document.createElement("option");
-    opt.value = "";
-    opt.textContent = "(no saved views)";
-    sel.appendChild(opt);
-    sel.disabled = true;
-    return;
-  }
+    if (names.length === 0) {
+	const opt = document.createElement("option");
+	opt.value = "";
+	opt.textContent = "(no saved views)";
+	sel.appendChild(opt);
+	sel.disabled = true;
+	return;
+    }
 
-  sel.disabled = false;
-  names.forEach(n => {
-    const opt = document.createElement("option");
-    opt.value = n;
-    opt.textContent = n;
-    sel.appendChild(opt);
-  });
+    sel.disabled = false;
+    names.forEach(n => {
+	const opt = document.createElement("option");
+	opt.value = n;
+	opt.textContent = n;
+	sel.appendChild(opt);
+    });
 }
 
 function saveCurrentView() {
-  const input = document.getElementById("viewName");
-  const name = (input?.value || "").trim();
-  if (!name) return alert("Enter a view name.");
+    const input = document.getElementById("viewName");
+    const name = (input?.value || "").trim();
+    if (!name) return alert("Enter a view name.");
 
-  const views = readViews();
-  const pose = getCameraPose();
+    const views = readViews();
+    const pose = getCameraPose();
 
-  views[name] = {
-    position: pose.position.toArray(),
-    target: pose.target.toArray(),
-    up: pose.up.toArray(),
-    layoutMode: currentLayoutMode
-  };
+    views[name] = {
+	position: pose.position.toArray(),
+	target: pose.target.toArray(),
+	up: pose.up.toArray(),
+	layoutMode: currentLayoutMode
+    };
 
-  writeViews(views);
-  initSavedViewsUI();
+    writeViews(views);
+    initSavedViewsUI();
 }
 
 function loadSelectedView() {
-  const sel = document.getElementById("savedViews");
-  const name = sel?.value;
-  if (!name) return;
+    const sel = document.getElementById("savedViews");
+    const name = sel?.value;
+    if (!name) return;
 
-  const views = readViews();
-  const v = views[name];
-  if (!v) return;
+    const views = readViews();
+    const v = views[name];
+    if (!v) return;
 
-  if (v.layoutMode) applyLayout(v.layoutMode);
+    if (v.layoutMode) applyLayout(v.layoutMode);
 
-  const pose = {
-    position: new THREE.Vector3().fromArray(v.position),
-    target: new THREE.Vector3().fromArray(v.target),
-    up: new THREE.Vector3().fromArray(v.up)
-  };
+    const pose = {
+	position: new THREE.Vector3().fromArray(v.position),
+	target: new THREE.Vector3().fromArray(v.target),
+	up: new THREE.Vector3().fromArray(v.up)
+    };
 
-  // If layout is animating, delay camera animation slightly
-  setTimeout(() => animateCameraPose(pose, 650), 680);
+    setTimeout(() => animateCameraPose(pose, 650), 680);
 }
 
 function deleteSelectedView() {
-  const sel = document.getElementById("savedViews");
-  const name = sel?.value;
-  if (!name) return;
+    const sel = document.getElementById("savedViews");
+    const name = sel?.value;
+    if (!name) return;
 
-  const views = readViews();
-  delete views[name];
-  writeViews(views);
-  initSavedViewsUI();
+    const views = readViews();
+    delete views[name];
+    writeViews(views);
+    initSavedViewsUI();
 }
 
 // ================================
-// HARDWARE TOPOLOGY
+// HARDWARE TOPOLOGY (OPTIMIZED INSTANCING)
 // ================================
 function buildHardwareTopology() {
     const nodesMap = {};
-    const groupBoxes = []; // Stores our dynamic Blade and Chassis wireframe boundaries
+    const groupBoxes = [];
 
     const boxW = 7;
     const boxH = 11;
     const boxD = 9;
 
-    // Force the Auto-Layout Grid (Ignores Python Offsets entirely)
     if (parsedData.hardware_blueprint) {
         const bp = parsedData.hardware_blueprint;
         let currentCabX = 0;
@@ -839,7 +845,6 @@ function buildHardwareTopology() {
 
                                 if (blade.nodes && Array.isArray(blade.nodes)) {
                                     blade.nodes.forEach((node, nIdx) => {
-                                        // FORCE: Nodes sit side-by-side (X), Blades stack vertically (Y)
                                         const absoluteX = currentRackX + (nIdx * 8); 
                                         const absoluteY = bIdx * 12; 
 
@@ -848,7 +853,6 @@ function buildHardwareTopology() {
                                             cpus: node.cpus || 1, coresPerCpu: node.cores_per_cpu || 1 
                                         };
 
-                                        // Expand Bounding Boxes
                                         if (absoluteX < bMinX) bMinX = absoluteX;
                                         if (absoluteX > bMaxX) bMaxX = absoluteX;
                                         if (absoluteY < bMinY) bMinY = absoluteY;
@@ -861,7 +865,6 @@ function buildHardwareTopology() {
                                     });
                                 }
 
-                                // Create Blade Bounding Box
                                 if (bMinX !== Infinity) {
                                     groupBoxes.push({
                                         type: 'blade',
@@ -872,14 +875,12 @@ function buildHardwareTopology() {
                             });
                         }
 
-                        // Create Chassis Bounding Box
                         if (rMinX !== Infinity) {
                             groupBoxes.push({
                                 type: 'chassis',
                                 x: rMinX + (rMaxX - rMinX) / 2, y: rMinY + (rMaxY - rMinY) / 2, z: 0,
                                 w: (rMaxX - rMinX) + boxW + 5, h: (rMaxY - rMinY) + boxH + 5, d: boxD + 5
                             });
-                            // Shift the X coordinate over for the next Chassis so they sit side-by-side
                             currentRackX += (rMaxX - rMinX) + 25; 
                         }
                     });
@@ -887,7 +888,6 @@ function buildHardwareTopology() {
                 currentCabX = currentRackX + 40; 
             });
         } else {
-            // Flat dictionary fallback
             Object.keys(bp).forEach(host => {
                 const node = bp[host];
                 if (host !== "cabinets" && host !== "metadata") {
@@ -897,7 +897,6 @@ function buildHardwareTopology() {
         }
     }
 
-    // Draw the Visual Grouping Boxes (Blades & Chassis)
     groupBoxes.forEach(g => {
         const geo = new THREE.BoxGeometry(g.w, g.h, g.d);
         const edges = new THREE.EdgesGeometry(geo);
@@ -909,13 +908,11 @@ function buildHardwareTopology() {
         const mesh = new THREE.LineSegments(edges, mat);
         
         mesh.name = "groupBox"; 
-        
         mesh.userData = { isGrouping: true, type: g.type };
         mesh.position.set(g.x, g.y, g.z);
         scene.add(mesh);
     }); 
 
-    // Map the Ranks to their Nodes
     if (parsedData.topology && Array.isArray(parsedData.topology)) {
         parsedData.topology.forEach(t => {
             const host = t.hostname || "unknown";
@@ -932,7 +929,6 @@ function buildHardwareTopology() {
         });
     }
 
-    // Draw Nodes, Processors (Chips), and Cores
     let maxY = 0, minX = Infinity, maxX = -Infinity;
     let totalNodes = 0;
 
@@ -947,7 +943,10 @@ function buildHardwareTopology() {
     const sharedChipMat = new THREE.MeshBasicMaterial({ color: 0x21262d, transparent: true, opacity: 0.8 });
     
     const sharedIdleCoreMat = new THREE.MeshBasicMaterial({ color: 0x6e7681, transparent: true, opacity: 0.6 });
-    const sharedActiveRankMat = new THREE.MeshLambertMaterial({ color: 0x4b5563, emissive: 0x58a6ff, emissiveIntensity: 0.15 });
+    // Core Instancing material must use white basic material to allow purely driving colors via instanceColor without lighting interference
+    const sharedActiveRankMat = new THREE.MeshBasicMaterial({ color: 0xffffff }); 
+
+    const dummy = new THREE.Object3D();
 
     Object.keys(nodesMap).forEach(host => {
         const nData = nodesMap[host];
@@ -963,7 +962,7 @@ function buildHardwareTopology() {
         rankToNodeGroup.set(host, nodeGroup);
         nodeMap.set(host, nodeGroup);
 
-        nodeGroup.userData = { host: host };   // enables node selection status text
+        nodeGroup.userData = { host: host };  
         nodeOriginalPos.set(host, nodeGroup.position.clone());
 
         const isActiveNode = nData.ranks.length > 0;
@@ -983,6 +982,9 @@ function buildHardwareTopology() {
         const numCores = nData.coresPerCpu || 1;
         const ranks = nData.ranks.sort((a, b) => a.id - b.id);
 
+        const activeCoreCount = ranks.length;
+        const idleCoreCount = (numChips * numCores) - activeCoreCount;
+
         const chipCols = Math.ceil(Math.sqrt(numChips));
         const chipRows = Math.ceil(numChips / chipCols);
         const chipSpaceX = (boxW - 0.5) / chipCols;
@@ -998,9 +1000,34 @@ function buildHardwareTopology() {
 
         const chipGeo = new THREE.BoxGeometry(chipSpaceX * 0.9, chipSpaceY * 0.9, 0.2);
         const coreGeo = new THREE.BoxGeometry(coreSize, coreSize, coreSize);
-
         const actualGridWidth = coreCols * coreSpacing;
         const actualGridHeight = coreRows * coreSpacing;
+
+        // Initialize Instanced Meshes for this Node
+        let instActiveCores = null;
+        let instIdleCores = null;
+        let instChips = new THREE.InstancedMesh(chipGeo, sharedChipMat, numChips);
+        nodeGroup.add(instChips);
+
+        const activeRankData = {}; // maps instanceId -> data for raycasting
+
+        if (activeCoreCount > 0) {
+            instActiveCores = new THREE.InstancedMesh(coreGeo, sharedActiveRankMat.clone(), activeCoreCount);
+            instActiveCores.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+            instActiveCores.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(activeCoreCount * 3), 3);
+            for(let i=0; i<activeCoreCount; i++) instActiveCores.setColorAt(i, defaultRankColor);
+            
+            instActiveCores.name = "mpiRankInstance";
+            instActiveCores.userData = { isInstancedCore: true, host: host, rankData: activeRankData };
+            nodeGroup.add(instActiveCores);
+        }
+
+        if (idleCoreCount > 0) {
+            instIdleCores = new THREE.InstancedMesh(coreGeo, sharedIdleCoreMat, idleCoreCount);
+            nodeGroup.add(instIdleCores);
+        }
+
+        let chipIdx = 0, activeIdx = 0, idleIdx = 0;
 
         for (let c = 0; c < numChips; c++) {
             const cRow = Math.floor(c / chipCols);
@@ -1010,9 +1037,9 @@ function buildHardwareTopology() {
             const chipOffsetY = -((cRow * chipSpaceY) - ((chipRows - 1) * chipSpaceY) / 2);
             const chipOffsetZ = (boxD / 2) - 0.3; 
 
-            const chipMesh = new THREE.Mesh(chipGeo, sharedChipMat);
-            chipMesh.position.set(chipOffsetX, chipOffsetY, chipOffsetZ); 
-            nodeGroup.add(chipMesh);
+            dummy.position.set(chipOffsetX, chipOffsetY, chipOffsetZ);
+            dummy.updateMatrix();
+            instChips.setMatrixAt(chipIdx++, dummy.matrix);
 
             const startX = chipOffsetX - (actualGridWidth / 2) + (coreSpacing / 2);
             const startY = chipOffsetY + (actualGridHeight / 2) - (coreSpacing / 2); 
@@ -1028,43 +1055,51 @@ function buildHardwareTopology() {
                 const globalSlotIndex = (c * numCores) + i;
                 const activeRank = ranks[globalSlotIndex];
 
-                if (activeRank) {
-                    const uniqueRankMat = sharedActiveRankMat.clone();
-                    const rankMesh = new THREE.Mesh(coreGeo, uniqueRankMat);
-                    rankMesh.name = "mpiRank";
-                    rankMesh.userData = { rank: activeRank.id, host: host, chip: c, core: i, isCore: true };
-                    rankMesh.position.set(coreOffsetX, coreOffsetY, coreOffsetZ); 
-                    nodeGroup.add(rankMesh);
+                dummy.position.set(coreOffsetX, coreOffsetY, coreOffsetZ);
+                dummy.updateMatrix();
+
+                if (activeRank && instActiveCores) {
+                    instActiveCores.setMatrixAt(activeIdx, dummy.matrix);
                     
-                    rankMap.set(activeRank.id, rankMesh); 
-                    rankToNodeGroup.set(activeRank.id, nodeGroup); 
-                } else {
-                    const idleMesh = new THREE.Mesh(coreGeo, sharedIdleCoreMat);
-                    idleMesh.name = "idleCore";
-                    idleMesh.position.set(coreOffsetX, coreOffsetY, coreOffsetZ); 
-                    nodeGroup.add(idleMesh);
+                    activeRankData[activeIdx] = { 
+                        rank: activeRank.id, host: host, chip: c, core: i, isCore: true,
+                        localPos: dummy.position.clone() 
+                    };
+                    
+                    rankMap.set(activeRank.id, { 
+                        mesh: instActiveCores, 
+                        instanceId: activeIdx,
+                        nodeGroup: nodeGroup,
+                        localPos: dummy.position.clone(),
+                        depth: coreSize
+                    }); 
+                    
+                    activeIdx++;
+                } else if (instIdleCores) {
+                    instIdleCores.setMatrixAt(idleIdx++, dummy.matrix);
                 }
             }
         }
+        
+        instChips.instanceMatrix.needsUpdate = true;
+        if (instActiveCores) instActiveCores.instanceMatrix.needsUpdate = true;
+        if (instIdleCores) instIdleCores.instanceMatrix.needsUpdate = true;
     });
 
-    // Adjust camera to perfectly frame the new auto-layout
     if (totalNodes > 0) {
         const cabWidth = (maxX - minX);
         const cabCenterX = minX + cabWidth / 2;
         const centerY = maxY / 2;
         const distanceToPullBack = Math.max(300, cabWidth * 1.5, maxY * 1.5);
- 
+	
         const floorGrid = scene.getObjectByName("floorGrid");
-        if (floorGrid) {
-            floorGrid.position.set(cabCenterX, -10, 0);
-        }       
- 
+        if (floorGrid) floorGrid.position.set(cabCenterX, -10, 0);       
+	
         camera.position.set(cabCenterX, centerY, distanceToPullBack);
         controls.target.set(cabCenterX, centerY, 0);
         controls.update();
         cacheDefaultCameraPose();
-currentLayoutMode = "blueprint";
+        currentLayoutMode = "blueprint";
     }
 }
 
@@ -1081,25 +1116,21 @@ function onMouseMove(event) {
     let hoveredRank = null;
     let hoveredNode = null;
 
-    // Search the intersected objects
     for (let i = 0; i < intersects.length; i++) {
         const obj = intersects[i].object;
         
-        if (obj.userData && obj.userData.isCore) {
-            hoveredRank = obj;
-            break; // Ranks are the smallest/most specific, so we stop looking
+        if (obj.userData && obj.userData.isInstancedCore) {
+            hoveredRank = obj.userData.rankData[intersects[i].instanceId];
+            break; 
         } else if (obj.userData && obj.userData.isNode && !hoveredNode) {
-            hoveredNode = obj; // Save the node, but keep looking in case there's a core behind it
+            hoveredNode = obj.userData; 
         }
     }
 
-    const targetObj = hoveredRank || hoveredNode;
+    const data = hoveredRank || hoveredNode;
 
-    if (targetObj) {
-        const data = targetObj.userData;
-        
+    if (data) {
         if (data.isCore) {
-            // Core Tooltip
             tooltipEl.innerHTML = `
                 <strong style="color: #58a6ff; font-size: 1.0rem;">Rank ${data.rank}</strong><br/>
                 <hr style="border: 0; border-top: 1px solid #30363d; margin: 6px 0;">
@@ -1107,12 +1138,11 @@ function onMouseMove(event) {
                 <span style="color: #8b949e;">Chip:</span> ${data.chip} | <span style="color: #8b949e;">Core:</span> ${data.core}
             `;
         } else if (data.isNode) {
-            // Node Chassis Tooltip
             tooltipEl.innerHTML = `
                 <strong style="color: #8b949e; font-size: 1.0rem;">Node Chassis</strong><br/>
                 <hr style="border: 0; border-top: 1px solid #30363d; margin: 6px 0;">
                 <span style="color: #8b949e;">Host:</span> <span style="color: #c9d1d9;">${data.hostname}</span>
-            `;
+		`;
         }
         
         tooltipEl.style.display = 'block';
@@ -1139,18 +1169,25 @@ function onCanvasClick(event) {
     for (let i = 0; i < intersects.length; i++) {
         const object = intersects[i].object;
         
-        if (object.name === "mpiNode" || object.name === "mpiRank") {
-    // If we clicked the node shell, use its parent group as the selection target
-    const selected = (object.name === "mpiNode" && object.parent) ? object.parent : object;
-    setSelectedObject(selected);
-
-    const targetPosition = new THREE.Vector3();
-    selected.getWorldPosition(targetPosition);
-
-    flyCameraTo(targetPosition);
-    break;
-}
-
+        if (object.userData && object.userData.isInstancedCore) {
+            const data = object.userData.rankData[intersects[i].instanceId];
+            
+            // Build a mock object that mimics a standard THREE.Object3D for the Follow logic
+            const targetPosition = data.localPos.clone().add(object.parent.position);
+            const mockObj = { userData: data, worldPos: targetPosition, name: `Rank ${data.rank}` };
+            
+            setSelectedObject(mockObj);
+            flyCameraTo(targetPosition);
+            break;
+            
+        } else if (object.name === "mpiNode") {
+            const selected = object.parent;
+            setSelectedObject(selected);
+            const targetPosition = new THREE.Vector3();
+            selected.getWorldPosition(targetPosition);
+            flyCameraTo(targetPosition);
+            break;
+        }
     }
 }
 
@@ -1179,14 +1216,13 @@ function flyCameraTo(targetPos) {
         if (t < 1) {
             requestAnimationFrame(animateTransition);
         } else {
-           controls.enabled = !isFollowEnabled;
-           controls.update();
-       }
+            controls.enabled = !isFollowEnabled;
+            controls.update();
+	}
     }
     
     requestAnimationFrame(animateTransition);
 }
-
 
 // ==========================================
 // PLAYBACK & RENDERING
@@ -1226,12 +1262,12 @@ async function seekToTime(time, isPlayingLoop = false) {
     document.getElementById("currentTimeLabel").textContent = currentTime.toFixed(3);
     
     try {
-      await ensureChunkLoadedForTime(currentTime);
+	await ensureChunkLoadedForTime(currentTime);
     } catch (e) {
-      pausePlayback();
-      return [];
+	pausePlayback();
+	return [];
     }   
- 
+    
     const activeEvents = renderActiveCommunications();
     
     if (!isPlayingLoop) {
@@ -1283,109 +1319,80 @@ function renderActiveCommunications() {
     const timeline = parsedData.timeline;
     const activeEvents = [];
 
-    // Binary Search
     if (timeline && timeline.length > 0) {
-        let left = 0;
-        let right = timeline.length - 1;
-        let mid = 0;
+        let left = 0, right = timeline.length - 1, mid = 0;
         
         while (left <= right) {
             mid = Math.floor((left + right) / 2);
-            if (timeline[mid].time <= currentTime) {
-                left = mid + 1;
-            } else {
-                right = mid - 1;
-            }
+            if (timeline[mid].time <= currentTime) left = mid + 1;
+            else right = mid - 1;
         }
         
         const MAX_VISIBLE_MESSAGES = 400;
         let eventsCaptured = 0;
- 
+	
         for (let i = right; i >= 0; i--) {
             if (timeline[i].time >= minTimeWindow) {
                 activeEvents.push(timeline[i]);
                 eventsCaptured++;
                 if (eventsCaptured >= MAX_VISIBLE_MESSAGES) break; 
-            } else {
-                break;
-            }
+            } else break;
         } 
     }
+
+    const drawnCollectiveLines = new Set();
 
     activeEvents.forEach(event => {
         const cat = MPI_CATEGORIES[event.call] || DEFAULT_CATEGORY;
 
-        // Illumination Logic
-        const senderMesh = rankMap.get(event.sender);
-        const recvMesh = rankMap.get(event.receiver);
+        const sData = rankMap.get(event.sender);
+        const rData = rankMap.get(event.receiver);
 
-        if (event.call === "MPI_WAIT" || event.call === "MPI_WAITALL") {
-            return;
-        } else {
-            if (senderMesh) {
-                senderMesh.material.emissive.setHex(cat.color);
-                senderMesh.material.emissiveIntensity = 1.0;
+        if (event.call !== "MPI_WAIT" && event.call !== "MPI_WAITALL") {
+            const color = new THREE.Color(cat.color);
+            if (sData) {
+                activelyGlowingRanks.set(event.sender, { mesh: sData.mesh, instanceId: sData.instanceId, color: color, intensity: 1.0 });
+                sData.mesh.setColorAt(sData.instanceId, color);
+                sData.mesh.instanceColor.needsUpdate = true;
             }
-            if (recvMesh) {
-                recvMesh.material.emissive.setHex(cat.color);
-                recvMesh.material.emissiveIntensity = 1.0;
+            if (rData) {
+                activelyGlowingRanks.set(event.receiver, { mesh: rData.mesh, instanceId: rData.instanceId, color: color, intensity: 1.0 });
+                rData.mesh.setColorAt(rData.instanceId, color);
+                rData.mesh.instanceColor.needsUpdate = true;
             }
         }
 
         if (event.sender === event.receiver) return;
 
-       // Line Routing Logic
-        const sNodeGroup = rankToNodeGroup.get(event.sender);
-        const rNodeGroup = rankToNodeGroup.get(event.receiver);
+        if (sData && rData) {
+            if (sData.nodeGroup === rData.nodeGroup) {
+                const startWorld = sData.localPos.clone().applyMatrix4(sData.nodeGroup.matrixWorld);
+                const endWorld = rData.localPos.clone().applyMatrix4(rData.nodeGroup.matrixWorld);
+                
+                startWorld.z += (sData.depth / 2) + 0.5;
+                endWorld.z += (rData.depth / 2) + 0.5;
 
-        if (sNodeGroup && rNodeGroup) {
-            if (sNodeGroup === rNodeGroup) {
-                // Intra-node (Core to Core inside the same chassis)
-                const sRankMesh = rankMap.get(event.sender);
-                const rRankMesh = rankMap.get(event.receiver);
-
-                if (sRankMesh && rRankMesh) {
-                    const startWorld = new THREE.Vector3();
-                    const endWorld = new THREE.Vector3();
-                    
-                    sRankMesh.getWorldPosition(startWorld);
-                    rRankMesh.getWorldPosition(endWorld);
-
-                    const sDepth = sRankMesh.geometry.parameters.depth || 1.0;
-                    const rDepth = rRankMesh.geometry.parameters.depth || 1.0;
-                    startWorld.z += (sDepth / 2) + 0.5;
-                    endWorld.z += (rDepth / 2) + 0.5;
-
-                    drawIntraNodeLine(startWorld, endWorld, event.call);
-                }
+                drawIntraNodeLine(startWorld, endWorld, event.call);
             } else {
-                // Inter-node (Node chassis to Node chassis)
                 if (cat.type === "collective") {
-                    const startWorld = sNodeGroup.position.clone();
-                    const endWorld = rNodeGroup.position.clone();
+                    const startWorld = sData.nodeGroup.position.clone();
+                    const endWorld = rData.nodeGroup.position.clone();
+                    startWorld.z += 5.5; endWorld.z += 5.5;
                     
-                    startWorld.z += 5.5;
-                    endWorld.z += 5.5;
-
-                    drawInterNodeLine(startWorld, endWorld, event.call, event.sender, event.receiver);
-                } else {
-                    const sRankMesh = rankMap.get(event.sender);
-                    const rRankMesh = rankMap.get(event.receiver);
-
-                    if (sRankMesh && rRankMesh) {
-                        const startWorld = new THREE.Vector3();
-                        const endWorld = new THREE.Vector3();
-                        
-                        sRankMesh.getWorldPosition(startWorld);
-                        rRankMesh.getWorldPosition(endWorld);
-
-                        const sDepth = sRankMesh.geometry.parameters.depth || 1.0;
-                        const rDepth = rRankMesh.geometry.parameters.depth || 1.0;
-                        startWorld.z += (sDepth / 2) + 0.5;
-                        endWorld.z += (rDepth / 2) + 0.5;
-
+                    // PREVENT BLOWOUT: Create a unique string for this path and check if we already drew it
+                    const lineKey = `${event.call}-${sData.nodeGroup.uuid}-${rData.nodeGroup.uuid}`;
+                    if (!drawnCollectiveLines.has(lineKey)) {
                         drawInterNodeLine(startWorld, endWorld, event.call, event.sender, event.receiver);
+                        drawnCollectiveLines.add(lineKey);
                     }
+                    
+                } else {
+                    const startWorld = sData.localPos.clone().applyMatrix4(sData.nodeGroup.matrixWorld);
+                    const endWorld = rData.localPos.clone().applyMatrix4(rData.nodeGroup.matrixWorld);
+                    
+                    startWorld.z += (sData.depth / 2) + 0.5;
+                    endWorld.z += (rData.depth / 2) + 0.5;
+                    drawInterNodeLine(startWorld, endWorld, event.call, event.sender, event.receiver);
                 }
             }
         } 
@@ -1395,18 +1402,14 @@ function renderActiveCommunications() {
 }
 
 function drawIntraNodeLine(startPos, endPos, callName) {
-    const cat = MPI_CATEGORIES[callName] || DEFAULT_CATEGORY;
-
     const midPoint = startPos.clone().lerp(endPos, 0.5);
     const distance = startPos.distanceTo(endPos);
-
-    const bowDistance = Math.max(distance * 0.4, 1.0); 
-    midPoint.z += bowDistance;
+    midPoint.z += Math.max(distance * 0.4, 1.0); 
 
     const curve = new THREE.QuadraticBezierCurve3(startPos, midPoint, endPos);
+    const geometry = new THREE.TubeGeometry(curve, 10, 0.04, 4, false);
     
-    const geometry = new THREE.TubeGeometry(curve, 12, 0.08, 6, false);
-    const material = sharedMaterials[callName + "_junction"] || sharedMaterials["default_junction"];
+    const material = sharedMaterials[callName + "_tube"] || sharedMaterials["default_tube"];
 
     const tube = new THREE.Mesh(geometry, material);
     tube.name = "mpiLine";
@@ -1414,7 +1417,6 @@ function drawIntraNodeLine(startPos, endPos, callName) {
     activeLines.push(tube);
 
     createJunctionPoint(startPos, callName);
-    
     const tangent = curve.getTangent(1.0).normalize();
     createArrowhead(endPos, tangent, callName);
 }
@@ -1424,23 +1426,26 @@ function drawInterNodeLine(startPos, endPos, callName, sender, receiver) {
 
     const midPoint = startPos.clone().lerp(endPos, 0.5);
     const distance = startPos.distanceTo(endPos);
-    const bowDistance = Math.max(distance * 0.3, 2.0); 
-    const laneOffset = (sender > receiver) ? 2.0 : -2.0;
+    
+    const bowDistance = Math.max(distance * 0.3, 8.0); 
+    const laneOffset = (sender > receiver) ? 3.0 : -3.0;
 
+    // Force all lines to bulge outwards (positive Z) toward the camera
+    // Use the Y axis to vertically separate the traffic lanes
     if (cat.type === "collective") {
-        midPoint.z += bowDistance; 
+        midPoint.z += bowDistance * 1.5; // Collectives bow out the furthest
     } else if (cat.type === "p2p_nonblock") {
-        midPoint.x -= bowDistance; 
-        midPoint.z += laneOffset; 
+        midPoint.z += bowDistance; 
+        midPoint.y += laneOffset; // Shift up/down to avoid collisions
     } else {
-        midPoint.x += bowDistance; 
-        midPoint.z += laneOffset; 
+        midPoint.z += bowDistance; 
+        midPoint.y -= laneOffset;
     }
 
     const curve = new THREE.QuadraticBezierCurve3(startPos, midPoint, endPos);
     
-    const geometry = new THREE.TubeGeometry(curve, 20, 0.08, 6, false);
-    const material = sharedMaterials[callName + "_junction"] || sharedMaterials["default_junction"];
+    const geometry = new THREE.TubeGeometry(curve, 12, 0.12, 4, false);
+    const material = sharedMaterials[callName + "_tube"] || sharedMaterials["default_tube"];
 
     const tube = new THREE.Mesh(geometry, material);
     tube.name = "mpiLine";
@@ -1448,7 +1453,6 @@ function drawInterNodeLine(startPos, endPos, callName, sender, receiver) {
     activeLines.push(tube);
 
     createJunctionPoint(startPos, callName);
-    
     const tangent = curve.getTangent(1.0).normalize();
     createArrowhead(endPos, tangent, callName);
 }
@@ -1465,10 +1469,8 @@ function createArrowhead(pos, direction, callName) {
     const mat = sharedMaterials[callName + "_junction"] || sharedMaterials["default_junction"];
     const mesh = new THREE.Mesh(sharedArrowGeo, mat);
     mesh.position.copy(pos);
-    
     const target = pos.clone().add(direction);
     mesh.lookAt(target);
-    
     scene.add(mesh);
     junctionPoints.push(mesh); 
 }
@@ -1512,7 +1514,7 @@ function renderMetadata() {
     const programName = meta.program || meta.executable || meta.name || "Unknown Program";
     const runDate = meta.date || meta.timestamp || "Unknown Date";
     const systemName = meta.system_name || "Unknown System";
- 
+    
     const totalRanks = parsedData.topology ? parsedData.topology.length : 0;
     
     const activeNodes = new Set();
@@ -1525,108 +1527,108 @@ function renderMetadata() {
 
     container.innerHTML = `
         <div style="font-size: 0.75rem; color: #8b949e; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px;">
-            Run Metadata
-        </div>
+        Run Metadata
+    </div>
         <div style="color: #c9d1d9; font-family: 'Fira Code', monospace; font-size: 0.85rem; line-height: 1.6;">
-            <div><span style="color: #58a6ff;">Program:</span> ${programName}</div>
-            <div><span style="color: #58a6ff;">Date:</span> ${runDate}</div>
-            <div><span style="color: #58a6ff;">System:</span> ${systemName}</div>
-            <div><span style="color: #58a6ff;">Scale:</span> ${totalRanks} Ranks across ${totalActiveNodes} Nodes</div>
+        <div><span style="color: #58a6ff;">Program:</span> ${programName}</div>
+        <div><span style="color: #58a6ff;">Date:</span> ${runDate}</div>
+        <div><span style="color: #58a6ff;">System:</span> ${systemName}</div>
+        <div><span style="color: #58a6ff;">Scale:</span> ${totalRanks} Ranks across ${totalActiveNodes} Nodes</div>
         </div>
-    `;
+	`;
 }
 
 // ==========================================
 // RECORDING
 // ==========================================
 function pickSupportedMimeType() {
-  const candidates = [
-    "video/webm;codecs=vp9",
-    "video/webm;codecs=vp8",
-    "video/webm"
-  ];
-  return candidates.find(t => window.MediaRecorder?.isTypeSupported?.(t)) || "";
+    const candidates = [
+	"video/webm;codecs=vp9",
+	"video/webm;codecs=vp8",
+	"video/webm"
+    ];
+    return candidates.find(t => window.MediaRecorder?.isTypeSupported?.(t)) || "";
 }
 
 function downloadBlob(blob, filename) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
 }
 
 function getTimestampSlug() {
-  const d = new Date();
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 }
 
 async function startUIRecording({ fps = 60, bitsPerSecond = 8_000_000 } = {}) {
-  if (uiMediaRecorder) return;
+    if (uiMediaRecorder) return;
 
-  if (!navigator.mediaDevices?.getDisplayMedia) {
-    alert("UI recording not supported: navigator.mediaDevices.getDisplayMedia is unavailable.");
-    return;
-  }
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+	alert("UI recording not supported: navigator.mediaDevices.getDisplayMedia is unavailable.");
+	return;
+    }
 
-  uiStream = await navigator.mediaDevices.getDisplayMedia({
-    video: {
-      frameRate: fps,
-      width: { ideal: 1920 },
-      height: { ideal: 1080 }
-    },
-    audio: false
-  });
-
-  uiRecordedChunks = [];
-  const mimeType = pickSupportedMimeType();
-  const options = { bitsPerSecond };
-  if (mimeType) options.mimeType = mimeType;
-
-  uiMediaRecorder = new MediaRecorder(uiStream, options);
-
-  uiMediaRecorder.ondataavailable = (e) => {
-    if (e.data && e.data.size > 0) uiRecordedChunks.push(e.data);
-  };
-
-  uiMediaRecorder.onstop = () => {
-    const blob = new Blob(uiRecordedChunks, { type: uiMediaRecorder.mimeType || "video/webm" });
-    downloadBlob(blob, `mpi-vis-ui-${getTimestampSlug()}-t${currentTime.toFixed(3)}.webm`);
+    uiStream = await navigator.mediaDevices.getDisplayMedia({
+	video: {
+	    frameRate: fps,
+	    width: { ideal: 1920 },
+	    height: { ideal: 1080 }
+	},
+	audio: false
+    });
 
     uiRecordedChunks = [];
-    try { uiStream?.getTracks()?.forEach(t => t.stop()); } catch {}
-    uiStream = null;
-    uiMediaRecorder = null;
+    const mimeType = pickSupportedMimeType();
+    const options = { bitsPerSecond };
+    if (mimeType) options.mimeType = mimeType;
+
+    uiMediaRecorder = new MediaRecorder(uiStream, options);
+
+    uiMediaRecorder.ondataavailable = (e) => {
+	if (e.data && e.data.size > 0) uiRecordedChunks.push(e.data);
+    };
+
+    uiMediaRecorder.onstop = () => {
+	const blob = new Blob(uiRecordedChunks, { type: uiMediaRecorder.mimeType || "video/webm" });
+	downloadBlob(blob, `mpi-vis-ui-${getTimestampSlug()}-t${currentTime.toFixed(3)}.webm`);
+
+	uiRecordedChunks = [];
+	try { uiStream?.getTracks()?.forEach(t => t.stop()); } catch {}
+	uiStream = null;
+	uiMediaRecorder = null;
+
+	const status = document.getElementById("recUIStatus");
+	if (status) status.textContent = "";
+	const startBtn = document.getElementById("btn-rec-ui-start");
+	const stopBtn = document.getElementById("btn-rec-ui-stop");
+	if (startBtn) startBtn.disabled = false;
+	if (stopBtn) stopBtn.disabled = true;
+    };
+
+    uiStream.getVideoTracks()[0].addEventListener("ended", () => {
+	if (uiMediaRecorder) uiMediaRecorder.stop();
+    });
+
+    uiMediaRecorder.start(250);
 
     const status = document.getElementById("recUIStatus");
-    if (status) status.textContent = "";
+    if (status) status.textContent = "Recording UI…";
     const startBtn = document.getElementById("btn-rec-ui-start");
     const stopBtn = document.getElementById("btn-rec-ui-stop");
-    if (startBtn) startBtn.disabled = false;
-    if (stopBtn) stopBtn.disabled = true;
-  };
-
-  uiStream.getVideoTracks()[0].addEventListener("ended", () => {
-    if (uiMediaRecorder) uiMediaRecorder.stop();
-  });
-
-  uiMediaRecorder.start(250);
-
-  const status = document.getElementById("recUIStatus");
-  if (status) status.textContent = "Recording UI…";
-  const startBtn = document.getElementById("btn-rec-ui-start");
-  const stopBtn = document.getElementById("btn-rec-ui-stop");
-  if (startBtn) startBtn.disabled = true;
-  if (stopBtn) stopBtn.disabled = false;
+    if (startBtn) startBtn.disabled = true;
+    if (stopBtn) stopBtn.disabled = false;
 }
 
 function stopUIRecording() {
-  if (!uiMediaRecorder) return;
-  uiMediaRecorder.stop();
+    if (!uiMediaRecorder) return;
+    uiMediaRecorder.stop();
 }
 
 // ======
@@ -1834,6 +1836,10 @@ function updateDynamicSpectrogram(activeEvents) {
             const count = currentCounts[call][bin];
             const td = dynamicCells[call][bin];
             
+            // Only rewrite the DOM if the values actually changed
+            if (td.dataset.lastCount == count) return; 
+            td.dataset.lastCount = count;
+
             td.title = `${call} (${bin}): ${count} active messages`;
             
             if (count === 0) {
