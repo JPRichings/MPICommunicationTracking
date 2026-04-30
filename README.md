@@ -1,8 +1,8 @@
-# MPI Communication Tracker and 3D Hardware Visualiser
+# Pyrite: MPI Communication Tracking and Visualiser
 
-A lightweight MPI tracing and visual analytics toolchain for HPC applications.
+Pyrite is a lightweight MPI tracing and visual analytics toolchain for HPC applications.
 
-This project intercepts MPI communication at runtime, records a compact binary trace, converts it into a streamed visualisation format, extracts common communication patterns and likely performance problems, and renders the result on a 3D representation of your physical hardware topology.
+This project intercepts MPI communication at runtime, records a compact binary trace, converts it into a streamed visualisation format, extracts common communication patterns and likely performance problems, and provides a web based rendering tool to display the result on a 3D representation of your physical hardware topology.
 
 ## Features
 
