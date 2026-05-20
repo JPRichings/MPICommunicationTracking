@@ -2449,10 +2449,10 @@ void mpi_gather_(const void *sendbuf, MPI_Fint *sendcount, MPI_Fint *sendtype, v
 
 	PMPI_Comm_size(c_comm, &comm_size);
 	if (!is_inter && local_world == root_world) {
-	  aggregate_recvcount = safe_mul_to_int((int)*recvcount, comm_size);
+	  aggregate_recvcount = safe_mul_to_int(c_recv_count, comm_size);
 	}
 
-	record_large_event(ts, MPI_GATHER_TYPE, (int)*comm, local_world, root_world, c_send_count, c_sendtype, 0, root_world, root_world, aggregate_recvcount, (aggregate_recvcount > 0) ? (int)*recvtype : MPI_DATATYPE_NULL, 0);
+	record_large_event(ts, MPI_GATHER_TYPE, c_comm, local_world, root_world, c_send_count, c_sendtype, 0, root_world, root_world, aggregate_recvcount, (aggregate_recvcount > 0) ? c_recvtype : MPI_DATATYPE_NULL, 0);
     }
 
     trace_in_wrapper = 0;
