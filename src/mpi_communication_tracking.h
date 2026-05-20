@@ -128,6 +128,9 @@ extern "C" {
   unsigned long get_processor_and_core(int *chip, int *core);
   void get_date_time_string(char *out);
 
+  // Prevents double-logging when MPI implementations call MPI_ functions internally
+  extern __thread int trace_in_wrapper;
+
 #ifdef __cplusplus
 }
 #endif

@@ -15,6 +15,14 @@
 #include "mpi_communication_tracking.h"
 
 /* -------------------------------------------------------------------------- */
+/* Guard to make sure tracing isn't activited multiple times when MPI calls   */
+/* end up self calling or calling other thing. This is mainly an issue for    */
+/* cross language interfaces like Fortran implementations calling the C       */
+/* interface to actually perform the communications                           */
+/* -------------------------------------------------------------------------- */
+__thread int trace_in_wrapper = 0;
+
+/* -------------------------------------------------------------------------- */
 /* Common Exposed State (Read-Only for Backends)                              */
 /* -------------------------------------------------------------------------- */
 
@@ -1385,6 +1393,14 @@ int MPI_Reduce(const void *sendbuf, void *recvbuf, int count, MPI_Datatype datat
 }
 
 int MPI_Allreduce(const void *sendbuf, void *recvbuf, int count, MPI_Datatype datatype, MPI_Op op, MPI_Comm comm) {
+
+  // If we arrived here via a Fortran wrapper, skip double-logging
+  if (trace_in_wrapper) {
+      return PMPI_Allreduce(sendbuf, recvbuf, count, datatype, op, comm);
+  }
+
+  trace_in_wrapper = 1; // Lock the guard
+
   int rc;
   int local_world = tracking_my_rank;
   double ts = trace_timestamp();
@@ -1397,6 +1413,9 @@ int MPI_Allreduce(const void *sendbuf, void *recvbuf, int count, MPI_Datatype da
     }
     record_small_event(ts, MPI_ALLREDUCE_TYPE, MPI_Comm_c2f(comm), 0, local_world, local_world, count, datatype);
   }
+
+  trace_in_wrapper = 0; // Unlock the guard
+ 
   return rc;
 }
 
@@ -2181,6 +2200,15 @@ void MPI_REDUCE(const void *sendbuf, void *recvbuf, MPI_Fint *count, MPI_Fint *d
 
 // Because users can potentially pass MPI_IN_PLACE as a sendbuf here we can't just forward to the C wrapper we already have.
 void mpi_allreduce_(const void *sendbuf, void *recvbuf, MPI_Fint *count, MPI_Fint *datatype, MPI_Fint *op, MPI_Fint *comm, MPI_Fint *ierr) {
+
+// If somehow another wrapper called this, pass through
+    if (trace_in_wrapper) {
+        pmpi_allreduce_(sendbuf, recvbuf, count, datatype, op, comm, ierr);   
+        return;
+    }
+
+    trace_in_wrapper = 1; // Lock the guard
+
     int local_world = tracking_my_rank;
     double ts = trace_timestamp();
 
@@ -2201,6 +2229,9 @@ void mpi_allreduce_(const void *sendbuf, void *recvbuf, MPI_Fint *count, MPI_Fin
 
         record_small_event(ts, MPI_ALLREDUCE_TYPE, (int)*comm, 0, local_world, local_world, c_count, c_type);
     }
+
+    trace_in_wrapper = 0; // Unlock the guard
+
 }
 
 void mpi_allreduce__(const void *sendbuf, void *recvbuf, MPI_Fint *count, MPI_Fint *datatype, MPI_Fint *op, MPI_Fint *comm, MPI_Fint *ierr) { 
