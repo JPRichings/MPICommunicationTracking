@@ -168,3 +168,12 @@ target_link_libraries(telemetry_daemon PRIVATE
 
 target_compile_options(telemetry_daemon PRIVATE ${COMMON_C_COMPILER_FLAGS})
 
+# =========================================================================
+# Installation Rules for Compiled Targets
+# =========================================================================
+
+install(TARGETS mpitrace_file mpitrace_shm telemetry_daemon
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} 
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
