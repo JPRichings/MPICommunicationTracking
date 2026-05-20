@@ -131,6 +131,15 @@ extern "C" {
   // Prevents double-logging when MPI implementations call MPI_ functions internally
   extern __thread int trace_in_wrapper;
 
+
+  // Fortran external MPI interfaces
+  extern void pmpi_reduce_(const void *sendbuf, void *recvbuf, MPI_Fint *count, MPI_Fint *datatype, MPI_Fint *op, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *ierr);
+  extern void pmpi_allreduce_(const void *sendbuf, void *recvbuf, MPI_Fint *count, MPI_Fint *datatype, MPI_Fint *op, MPI_Fint *comm, MPI_Fint *ierr);
+  extern void pmpi_gather_(const void *sendbuf, MPI_Fint *sendcount, MPI_Fint *sendtype, void *recvbuf, MPI_Fint *recvcount, MPI_Fint *recvtype, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *ierr);
+  extern void pmpi_scatter_(const void *sendbuf, MPI_Fint *sendcount, MPI_Fint *sendtype, void *recvbuf, MPI_Fint *recvcount, MPI_Fint *recvtype, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *ierr);
+  extern void pmpi_allgather_(const void *sendbuf, MPI_Fint *sendcount, MPI_Fint *sendtype, void *recvbuf, MPI_Fint *recvcount, MPI_Fint *recvtype, MPI_Fint *comm, MPI_Fint *ierr);
+
+
 #ifdef __cplusplus
 }
 #endif
