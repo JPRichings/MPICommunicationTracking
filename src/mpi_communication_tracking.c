@@ -2337,18 +2337,52 @@ void mpi_bcast_(void *buffer, MPI_Fint *count, MPI_Fint *datatype, MPI_Fint *roo
 void mpi_bcast__(void *buffer, MPI_Fint *count, MPI_Fint *datatype, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *ierr) { mpi_bcast_(buffer, count, datatype, root, comm, ierr); }
 void MPI_BCAST(void *buffer, MPI_Fint *count, MPI_Fint *datatype, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *ierr) { mpi_bcast_(buffer, count, datatype, root, comm, ierr); }
 
+// Because users can potentially pass MPI_IN_PLACE as a sendbuf here we can't just forward to the C wrapper we already have.
 void mpi_reduce_(const void *sendbuf, void *recvbuf, MPI_Fint *count, MPI_Fint *datatype, MPI_Fint *op, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *ierr) {
-  *ierr = (MPI_Fint)MPI_Reduce(sendbuf, recvbuf, (int)*count, PMPI_Type_f2c(*datatype), PMPI_Op_f2c(*op), (int)*root, MPI_Comm_f2c(*comm));
+    int local_world = tracking_my_rank;
+    int root_world = (int)*root;
+    double ts = trace_timestamp();
+
+    if(trace_in_wrapper) return pmpi_reduce_(sendbuf, recvbuf, count, datatype, op, root, comm, ierr);
+    trace_in_wrapper = 1;
+
+    // Call the underlying Fortran PMPI layer.
+    // This safely resolves MPI_IN_PLACE and populates *ierr with the return code.
+    pmpi_reduce_(sendbuf, recvbuf, count, datatype, op, root, comm, ierr);
+
+    if (*ierr == MPI_SUCCESS) {
+        
+        // Translate Fortran handles to C handles for our internal tracker logic
+        MPI_Comm c_comm = PMPI_Comm_f2c(*comm);
+        MPI_Datatype c_type = PMPI_Type_f2c(*datatype);
+        int c_count = (int)*count;
+
+        if (c_comm != MPI_COMM_WORLD && c_comm != MPI_COMM_NULL) {
+            current_world_rank_in_comm(c_comm, &local_world);
+	    translate_comm_rank_to_world(c_comm, (int)*root, 0, &root_world);
+        }
+
+        record_small_event(ts, MPI_REDUCE_TYPE, (int)*comm, 0, local_world, root_world, c_count, c_type);
+    }
+
+    trace_in_wrapper = 0;
+
 }
-void mpi_reduce__(const void *sendbuf, void *recvbuf, MPI_Fint *count, MPI_Fint *datatype, MPI_Fint *op, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *ierr) { mpi_reduce_(sendbuf, recvbuf, count, datatype, op, root, comm, ierr); }
-void MPI_REDUCE(const void *sendbuf, void *recvbuf, MPI_Fint *count, MPI_Fint *datatype, MPI_Fint *op, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *ierr) { mpi_reduce_(sendbuf, recvbuf, count, datatype, op, root, comm, ierr); }
+
+
+void mpi_reduce__(const void *sendbuf, void *recvbuf, MPI_Fint *count, MPI_Fint *datatype, MPI_Fint *op, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *ierr) { 
+  mpi_reduce_(sendbuf, recvbuf, count, datatype, op, root, comm, ierr);
+}
+void MPI_REDUCE(const void *sendbuf, void *recvbuf, MPI_Fint *count, MPI_Fint *datatype, MPI_Fint *op, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *ierr) { 
+  mpi_reduce_(sendbuf, recvbuf, count, datatype, op, root, comm, ierr); 
+}
 
 // Because users can potentially pass MPI_IN_PLACE as a sendbuf here we can't just forward to the C wrapper we already have.
 void mpi_allreduce_(const void *sendbuf, void *recvbuf, MPI_Fint *count, MPI_Fint *datatype, MPI_Fint *op, MPI_Fint *comm, MPI_Fint *ierr) {
     int local_world = tracking_my_rank;
     double ts = trace_timestamp();
 
-    if( trace_in_wrapper) return pmpi_allreduce_(sendbuf, recvbuf, count, datatype, op, comm, ierr);
+    if(trace_in_wrapper) return pmpi_allreduce_(sendbuf, recvbuf, count, datatype, op, comm, ierr);
     trace_in_wrapper = 1;
 
     // Call the underlying Fortran PMPI layer.
@@ -2382,11 +2416,55 @@ void PMPI_ALLREDUCE(const void *sendbuf, void *recvbuf, MPI_Fint *count, MPI_Fin
 }
 
 
+// Because users can potentially pass MPI_IN_PLACE as a sendbuf here we can't just forward to the C wrapper we already have.
 void mpi_gather_(const void *sendbuf, MPI_Fint *sendcount, MPI_Fint *sendtype, void *recvbuf, MPI_Fint *recvcount, MPI_Fint *recvtype, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *ierr) {
-  *ierr = (MPI_Fint)MPI_Gather(sendbuf, (int)*sendcount, PMPI_Type_f2c(*sendtype), recvbuf, (int)*recvcount, PMPI_Type_f2c(*recvtype), (int)*root, MPI_Comm_f2c(*comm));
+    int local_world = tracking_my_rank;
+    int root_world = (int)*root;
+    double ts = trace_timestamp();
+
+    if(trace_in_wrapper) return pmpi_gather_(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, root, comm, ierr);
+    trace_in_wrapper = 1;
+
+    // Call the underlying Fortran PMPI layer.
+    // This safely resolves MPI_IN_PLACE and populates *ierr with the return code.
+    pmpi_gather_(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, root, comm, ierr);
+
+    if (*ierr == MPI_SUCCESS) {
+        
+        // Translate Fortran handles to C handles for our internal tracker logic
+        MPI_Comm c_comm = PMPI_Comm_f2c(*comm);
+        MPI_Datatype c_sendtype = PMPI_Type_f2c(*sendtype);
+        MPI_Datatype c_recvtype = PMPI_Type_f2c(*recvtype);
+        int c_send_count = (int)*sendcount;
+        int c_recv_count = (int)*recvcount;
+	int is_inter = 0;
+	int comm_size = 1;
+	int aggregate_recvcount = 0;	
+
+        if (c_comm != MPI_COMM_WORLD && c_comm != MPI_COMM_NULL) {
+            current_world_rank_in_comm(c_comm, &local_world);
+	    translate_comm_rank_to_world(c_comm, (int)*root, 0, &root_world);
+	    PMPI_Comm_test_inter(c_comm, &is_inter);
+        }
+
+	PMPI_Comm_size(c_comm, &comm_size);
+	if (!is_inter && local_world == root_world) {
+	  aggregate_recvcount = safe_mul_to_int((int)*recvcount, comm_size);
+	}
+
+	record_large_event(ts, MPI_GATHER_TYPE, (int)*comm, local_world, root_world, c_send_count, c_sendtype, 0, root_world, root_world, aggregate_recvcount, (aggregate_recvcount > 0) ? (int)*recvtype : MPI_DATATYPE_NULL, 0);
+    }
+
+    trace_in_wrapper = 0;
+
 }
-void mpi_gather__(const void *sendbuf, MPI_Fint *sendcount, MPI_Fint *sendtype, void *recvbuf, MPI_Fint *recvcount, MPI_Fint *recvtype, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *ierr) { mpi_gather_(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, root, comm, ierr); }
-void MPI_GATHER(const void *sendbuf, MPI_Fint *sendcount, MPI_Fint *sendtype, void *recvbuf, MPI_Fint *recvcount, MPI_Fint *recvtype, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *ierr) { mpi_gather_(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, root, comm, ierr); }
+
+void mpi_gather__(const void *sendbuf, MPI_Fint *sendcount, MPI_Fint *sendtype, void *recvbuf, MPI_Fint *recvcount, MPI_Fint *recvtype, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *ierr) { 
+  mpi_gather_(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, root, comm, ierr); 
+}
+void MPI_GATHER(const void *sendbuf, MPI_Fint *sendcount, MPI_Fint *sendtype, void *recvbuf, MPI_Fint *recvcount, MPI_Fint *recvtype, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *ierr) { 
+  mpi_gather_(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, root, comm, ierr); 
+}
 
 void mpi_scatter_(const void *sendbuf, MPI_Fint *sendcount, MPI_Fint *sendtype, void *recvbuf, MPI_Fint *recvcount, MPI_Fint *recvtype, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *ierr) {
   *ierr = (MPI_Fint)MPI_Scatter(sendbuf, (int)*sendcount, PMPI_Type_f2c(*sendtype), recvbuf, (int)*recvcount, PMPI_Type_f2c(*recvtype), (int)*root, MPI_Comm_f2c(*comm));

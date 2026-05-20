@@ -1420,6 +1420,22 @@ def validate_reduce(trace):
         require_zero(rec, "tag", "reduce tag")
         require_comm_int(rec, "comm", "reduce comm")
 
+def validate_reduce_inplace(trace):
+    require(trace["world_size"] == 4, "reduce_inplace: world size should be 4")
+
+    for r in range(4):
+        rec = require_one(
+            trace["sections"][r]["small"],
+            message_type=MPI_REDUCE_TYPE,
+            sender=r,
+            receiver=1,
+            count=5,
+            bytes=20,
+        )
+        require_zero(rec, "tag", "reduce inplace tag")
+        require_comm_int(rec, "comm", "reduce inplace comm")
+
+
 def validate_gather(trace):
     require(trace["world_size"] == 4, "gather: world size should be 4")
 
@@ -2225,6 +2241,21 @@ def validate_fortran_reduce(trace):
         require_zero(rec, "tag", "fortran_reduce tag")
         require_comm_int(rec, "comm", "fortran_reduce comm")
 
+def validate_fortran_reduce_inplace(trace):
+    require(trace["world_size"] == 4, "fortran_reduce_inplace: world size should be 4")
+
+    for r in range(4):
+        rec = require_one(
+            trace["sections"][r]["small"],
+            message_type=MPI_REDUCE_TYPE,
+            sender=r,
+            receiver=1,
+            count=5,
+            bytes=20,
+        )
+        require_zero(rec, "tag", "fortran_reduce_inplace tag")
+        require_comm_int(rec, "comm", "fortran_reduce_inplace comm")
+
 def validate_fortran_reduce_f08(trace):
     require(trace["world_size"] == 4, "fortran_reduce_f08: world size should be 4")
 
@@ -2525,6 +2556,7 @@ VALIDATORS = {
     "gather": validate_gather,
     "scatter": validate_scatter,
     "reduce": validate_reduce,
+    "reduce_inplace": validate_reduce_inplace,
     "bcast": validate_bcast,
     "allgather": validate_allgather,
     "fortran_init_finalize": validate_fortran_init_finalize,
@@ -2552,6 +2584,7 @@ VALIDATORS = {
     "fortran_bcast": validate_fortran_bcast,
     "fortran_bcast_f08": validate_fortran_bcast_f08,
     "fortran_reduce": validate_fortran_reduce,
+    "fortran_reduce_inplace": validate_fortran_reduce_inplace,
     "fortran_reduce_f08": validate_fortran_reduce_f08,
     "fortran_allreduce": validate_fortran_allreduce,
     "fortran_allreduce_inplace": validate_fortran_allreduce_inplace,
