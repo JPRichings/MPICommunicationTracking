@@ -133,6 +133,7 @@ extern "C" {
 
 
   // Fortran external MPI interfaces
+  extern void pmpi_init_thread_(MPI_Fint *required, MPI_Fint *provided, MPI_Fint *ierr);
   extern void pmpi_init_(MPI_Fint *ierr);
   extern void pmpi_finalize_(MPI_Fint *ierr);  
   extern void pmpi_reduce_(const void *sendbuf, void *recvbuf, MPI_Fint *count, MPI_Fint *datatype, MPI_Fint *op, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *ierr);
@@ -144,7 +145,10 @@ extern "C" {
   extern void pmpi_waitall_(MPI_Fint *count, MPI_Fint array_of_requests[], MPI_Fint array_of_statuses[], MPI_Fint *ierr);
   extern void pmpi_waitany_(MPI_Fint *count, MPI_Fint array_of_requests[], MPI_Fint *index, MPI_Fint *status, MPI_Fint *ierr);
   extern void pmpi_waitsome_(MPI_Fint *incount, MPI_Fint array_of_requests[], MPI_Fint *outcount, MPI_Fint array_of_indices[], MPI_Fint array_of_statuses[], MPI_Fint *ierr);
-
+  extern void pmpi_test_(MPI_Fint *request, int *flag, MPI_Fint *status, MPI_Fint *ierr);
+  extern void pmpi_testall_(MPI_Fint *count, MPI_Fint array_of_requests[], int *flag, MPI_Fint array_of_statuses[], MPI_Fint *ierr);
+  extern void pmpi_testany_(MPI_Fint *count, MPI_Fint array_of_requests[], MPI_Fint *index, int *flag, MPI_Fint *status, MPI_Fint *ierr);
+  extern void pmpi_testsome_(MPI_Fint *incount, MPI_Fint array_of_requests[], MPI_Fint *outcount, MPI_Fint array_of_indices[], MPI_Fint array_of_statuses[], MPI_Fint *ierr);
 
 #ifdef __cplusplus
 }

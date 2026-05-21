@@ -1731,6 +1731,27 @@ static int validate_fortran_status_size(const char *wrapper_name,
 /* -------------------------------------------------------------------------- */
 /* Fortran Wrappers                                                           */
 /* -------------------------------------------------------------------------- */
+void mpi_init_thread_(MPI_Fint *required, MPI_Fint *provided, MPI_Fint *ierr) {
+    if (trace_in_wrapper) { 
+        pmpi_init_thread_(required, provided, ierr);
+        return;
+    }
+
+    trace_in_wrapper = 1;
+    
+    pmpi_init_thread_(required, provided, ierr);
+
+    if (*ierr == MPI_SUCCESS) {
+        *ierr = (MPI_Fint)begin_tracking_runtime();
+    }
+
+    trace_in_wrapper = 0;
+}
+
+void mpi_init_thread__(MPI_Fint *required, MPI_Fint *provided, MPI_Fint *ierr) { mpi_init_thread_(required, provided, ierr); }
+void mpi_init_thread_f08_(MPI_Fint *required, MPI_Fint *provided, MPI_Fint *ierr) { mpi_init_thread_(required, provided, ierr); }
+void MPI_INIT_THREAD(MPI_Fint *required, MPI_Fint *provided, MPI_Fint *ierr) { mpi_init_thread_(required, provided, ierr); }
+
 void mpi_init_(MPI_Fint *ierr) {
   if (trace_in_wrapper) { 
     pmpi_init_(ierr);
