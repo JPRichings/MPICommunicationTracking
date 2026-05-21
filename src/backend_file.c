@@ -392,6 +392,8 @@ static int file_init(int rank, int size) {
             local_ok = 0;
         } else {
             global_file = fopen(temp_output_name, "wb");
+	    // Allocate a 16MB buffer for this file pointer
+	    setvbuf(global_file, NULL, _IOFBF, 16 * 1024 * 1024);
             if (global_file == NULL) {
                 local_ok = 0;
             } else {
