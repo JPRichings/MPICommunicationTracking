@@ -138,6 +138,10 @@ extern "C" {
   extern void pmpi_gather_(const void *sendbuf, MPI_Fint *sendcount, MPI_Fint *sendtype, void *recvbuf, MPI_Fint *recvcount, MPI_Fint *recvtype, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *ierr);
   extern void pmpi_scatter_(const void *sendbuf, MPI_Fint *sendcount, MPI_Fint *sendtype, void *recvbuf, MPI_Fint *recvcount, MPI_Fint *recvtype, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *ierr);
   extern void pmpi_allgather_(const void *sendbuf, MPI_Fint *sendcount, MPI_Fint *sendtype, void *recvbuf, MPI_Fint *recvcount, MPI_Fint *recvtype, MPI_Fint *comm, MPI_Fint *ierr);
+extern void pmpi_wait_(MPI_Fint *request, MPI_Fint *status, MPI_Fint *ierr);
+extern void pmpi_waitall_(MPI_Fint *count, MPI_Fint array_of_requests[], MPI_Fint array_of_statuses[], MPI_Fint *ierr);
+extern void pmpi_waitany_(MPI_Fint *count, MPI_Fint array_of_requests[], MPI_Fint *index, MPI_Fint *status, MPI_Fint *ierr);
+extern void pmpi_waitsome_(MPI_Fint *incount, MPI_Fint array_of_requests[], MPI_Fint *outcount, MPI_Fint array_of_indices[], MPI_Fint array_of_statuses[], MPI_Fint *ierr);
 
 
 #ifdef __cplusplus

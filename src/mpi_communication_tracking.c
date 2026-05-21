@@ -1008,8 +1008,10 @@ int MPI_Sendrecv(const void *sendbuf, int sendcount, MPI_Datatype sendtype, int 
   return rc;
 }
 
-
 int MPI_Wait(MPI_Request *request, MPI_Status *status) {
+    if (trace_in_wrapper) return PMPI_Wait(request, status);
+    trace_in_wrapper = 1;
+
     int rc;
     int completed = 0;
     MPI_Request req_before = MPI_REQUEST_NULL;
@@ -1029,12 +1031,8 @@ int MPI_Wait(MPI_Request *request, MPI_Status *status) {
         call_status = MPI_STATUS_IGNORE;
     }
 
-    if(trace_in_wrapper) return PMPI_Wait(request, call_status);
-    trace_in_wrapper = 1;
-
     rc = PMPI_Wait(request, call_status);
     t_end = trace_timestamp();
-
 
     if (rc == MPI_SUCCESS) {
         if (tracked != NULL) {
@@ -1045,16 +1043,17 @@ int MPI_Wait(MPI_Request *request, MPI_Status *status) {
                 completed = 1;
             }
         }
-
         record_control_event(t_start, MPI_WAIT_TYPE, meta.valid ? meta.comm_id : 0, meta.valid ? meta.tag : 0, tracking_my_rank, completed);
     }
 
     trace_in_wrapper = 0;
-
     return rc;
 }
 
 int MPI_Waitall(int count, MPI_Request array_of_requests[], MPI_Status array_of_statuses[]) {
+    if (trace_in_wrapper) return PMPI_Waitall(count, array_of_requests, array_of_statuses);
+    trace_in_wrapper = 1;
+
     int rc;
     int i;
     int completed = 0;
@@ -1082,11 +1081,9 @@ int MPI_Waitall(int count, MPI_Request array_of_requests[], MPI_Status array_of_
     if (count > 0 && pre_handles == NULL) {
         rc = PMPI_Waitall(count, array_of_requests, call_statuses);
         free(temp_statuses);
+        trace_in_wrapper = 0;
         return rc;
     }
-
-    if(trace_in_wrapper) return PMPI_Waitall(count, array_of_requests, call_statuses);
-    trace_in_wrapper = 1;
 
     rc = PMPI_Waitall(count, array_of_requests, call_statuses);
     t_end = trace_timestamp();
@@ -1102,19 +1099,19 @@ int MPI_Waitall(int count, MPI_Request array_of_requests[], MPI_Status array_of_
                 completed++;
             }
         }
-
         record_control_event(t_start, MPI_WAITALL_TYPE, control_meta_comm(&meta), control_meta_tag(&meta), tracking_my_rank, completed);
     }
 
     free(pre_handles);
     free(temp_statuses);
-
     trace_in_wrapper = 0;
-
     return rc;
 }
 
 int MPI_Waitany(int count, MPI_Request array_of_requests[], int *index, MPI_Status *status) {
+    if (trace_in_wrapper) return PMPI_Waitany(count, array_of_requests, index, status);
+    trace_in_wrapper = 1;
+
     int rc;
     int completed = 0;
     int i;
@@ -1135,13 +1132,11 @@ int MPI_Waitany(int count, MPI_Request array_of_requests[], int *index, MPI_Stat
     if (count > 0 && pre_handles == NULL) {
         if (c_status_is_ignore(call_status)) call_status = &local_status;
         rc = PMPI_Waitany(count, array_of_requests, index, call_status);
+        trace_in_wrapper = 0;
         return rc;
     }
 
     if (c_status_is_ignore(call_status)) call_status = &local_status;
-
-    if(trace_in_wrapper) return PMPI_Waitany(count, array_of_requests, index, call_status);
-    trace_in_wrapper = 1;
 
     rc = PMPI_Waitany(count, array_of_requests, index, call_status);
     t_end = trace_timestamp();
@@ -1155,19 +1150,18 @@ int MPI_Waitany(int count, MPI_Request array_of_requests[], int *index, MPI_Stat
                 completed = 1;
             }
         }
-
         record_control_event(t_start, MPI_WAITANY_TYPE, meta.valid ? meta.comm_id : 0, meta.valid ? meta.tag : 0, tracking_my_rank, completed);
     }
 
     free(pre_handles);
-
     trace_in_wrapper = 0;
-
     return rc;
 }
 
-int MPI_Waitsome(int incount, MPI_Request array_of_requests[], int *outcount,
-                 int array_of_indices[], MPI_Status array_of_statuses[]) {
+int MPI_Waitsome(int incount, MPI_Request array_of_requests[], int *outcount, int array_of_indices[], MPI_Status array_of_statuses[]) {
+    if (trace_in_wrapper) return PMPI_Waitsome(incount, array_of_requests, outcount, array_of_indices, array_of_statuses);
+    trace_in_wrapper = 1;
+
     int rc;
     int i;
     int completed = 0;
@@ -1195,16 +1189,14 @@ int MPI_Waitsome(int incount, MPI_Request array_of_requests[], int *outcount,
     if (incount > 0 && pre_handles == NULL) {
         rc = PMPI_Waitsome(incount, array_of_requests, outcount, array_of_indices, call_statuses);
         free(temp_statuses);
+        trace_in_wrapper = 0;
         return rc;
     }
-
-    if(trace_in_wrapper) return PMPI_Waitsome(incount, array_of_requests, outcount, array_of_indices, call_statuses);
-    trace_in_wrapper = 1;
 
     rc = PMPI_Waitsome(incount, array_of_requests, outcount, array_of_indices, call_statuses);
     t_end = trace_timestamp();
 
-    if (rc == MPI_SUCCESS && outcount != NULL && *outcount != MPI_UNDEFINED) {
+    if (rc == MPI_SUCCESS && outcount != NULL && *outcount != MPI_UNDEFINED && *outcount > 0) {
         for (i = 0; i < *outcount; i++) {
             int idx = array_of_indices[i];
             pending_request_t *tracked = detach_pending_request(pre_handles[idx]);
@@ -1216,19 +1208,19 @@ int MPI_Waitsome(int incount, MPI_Request array_of_requests[], int *outcount,
                 completed++;
             }
         }
-
         record_control_event(t_start, MPI_WAITSOME_TYPE, control_meta_comm(&meta), control_meta_tag(&meta), tracking_my_rank, completed);
     }
 
     free(pre_handles);
     free(temp_statuses);
-
     trace_in_wrapper = 0;
-
     return rc;
 }
 
 int MPI_Test(MPI_Request *request, int *flag, MPI_Status *status) {
+    if (trace_in_wrapper) return PMPI_Test(request, flag, status);
+    trace_in_wrapper = 1;
+
     int rc;
     int completed = 0;
     MPI_Request req_before = MPI_REQUEST_NULL;
@@ -1248,9 +1240,6 @@ int MPI_Test(MPI_Request *request, int *flag, MPI_Status *status) {
         call_status = MPI_STATUS_IGNORE;
     }
 
-    if(trace_in_wrapper) return PMPI_Test(request, flag, call_status);
-    trace_in_wrapper = 1;
-
     rc = PMPI_Test(request, flag, call_status);
     t_end = trace_timestamp();
 
@@ -1263,16 +1252,17 @@ int MPI_Test(MPI_Request *request, int *flag, MPI_Status *status) {
                 completed = 1;
             }
         }
-
         record_control_event(t_start, MPI_TEST_TYPE, meta.valid ? meta.comm_id : 0, meta.valid ? meta.tag : 0, tracking_my_rank, completed);
     }
 
     trace_in_wrapper = 0;
-
     return rc;
 }
 
 int MPI_Testall(int count, MPI_Request array_of_requests[], int *flag, MPI_Status array_of_statuses[]) {
+    if (trace_in_wrapper) return PMPI_Testall(count, array_of_requests, flag, array_of_statuses);
+    trace_in_wrapper = 1;
+
     int rc;
     int i;
     int completed = 0;
@@ -1300,11 +1290,9 @@ int MPI_Testall(int count, MPI_Request array_of_requests[], int *flag, MPI_Statu
     if (count > 0 && pre_handles == NULL) {
         rc = PMPI_Testall(count, array_of_requests, flag, call_statuses);
         free(temp_statuses);
+        trace_in_wrapper = 0;
         return rc;
     }
-
-    if(trace_in_wrapper) return PMPI_Testall(count, array_of_requests, flag, call_statuses);
-    trace_in_wrapper = 1;
 
     rc = PMPI_Testall(count, array_of_requests, flag, call_statuses);
     t_end = trace_timestamp();
@@ -1320,19 +1308,19 @@ int MPI_Testall(int count, MPI_Request array_of_requests[], int *flag, MPI_Statu
                 completed++;
             }
         }
-
         record_control_event(t_start, MPI_TESTALL_TYPE, control_meta_comm(&meta), control_meta_tag(&meta), tracking_my_rank, completed);
     }
 
     free(pre_handles);
     free(temp_statuses);
-
     trace_in_wrapper = 0;
-
     return rc;
 }
 
 int MPI_Testany(int count, MPI_Request array_of_requests[], int *index, int *flag, MPI_Status *status) {
+    if (trace_in_wrapper) return PMPI_Testany(count, array_of_requests, index, flag, status);
+    trace_in_wrapper = 1;
+
     int rc;
     int completed = 0;
     int i;
@@ -1353,13 +1341,11 @@ int MPI_Testany(int count, MPI_Request array_of_requests[], int *index, int *fla
     if (count > 0 && pre_handles == NULL) {
         if (c_status_is_ignore(call_status)) call_status = &local_status;
         rc = PMPI_Testany(count, array_of_requests, index, flag, call_status);
+        trace_in_wrapper = 0;
         return rc;
     }
 
     if (c_status_is_ignore(call_status)) call_status = &local_status;
-
-    if(trace_in_wrapper) return PMPI_Testany(count, array_of_requests, index, flag, call_status);
-    trace_in_wrapper = 1;
 
     rc = PMPI_Testany(count, array_of_requests, index, flag, call_status);
     t_end = trace_timestamp();
@@ -1373,18 +1359,18 @@ int MPI_Testany(int count, MPI_Request array_of_requests[], int *index, int *fla
                 completed = 1;
             }
         }
-
         record_control_event(t_start, MPI_TESTANY_TYPE, meta.valid ? meta.comm_id : 0, meta.valid ? meta.tag : 0, tracking_my_rank, completed);
     }
 
     free(pre_handles);
-
     trace_in_wrapper = 0;
-
     return rc;
 }
 
 int MPI_Testsome(int incount, MPI_Request array_of_requests[], int *outcount, int array_of_indices[], MPI_Status array_of_statuses[]) {
+    if (trace_in_wrapper) return PMPI_Testsome(incount, array_of_requests, outcount, array_of_indices, array_of_statuses);
+    trace_in_wrapper = 1;
+
     int rc;
     int i;
     int completed = 0;
@@ -1412,11 +1398,9 @@ int MPI_Testsome(int incount, MPI_Request array_of_requests[], int *outcount, in
     if (incount > 0 && pre_handles == NULL) {
         rc = PMPI_Testsome(incount, array_of_requests, outcount, array_of_indices, call_statuses);
         free(temp_statuses);
+        trace_in_wrapper = 0;
         return rc;
     }
-
-    if(trace_in_wrapper) return PMPI_Testsome(incount, array_of_requests, outcount, array_of_indices, call_statuses);
-    trace_in_wrapper = 1;
 
     rc = PMPI_Testsome(incount, array_of_requests, outcount, array_of_indices, call_statuses);
     t_end = trace_timestamp();
@@ -1433,18 +1417,14 @@ int MPI_Testsome(int incount, MPI_Request array_of_requests[], int *outcount, in
                 completed++;
             }
         }
-
         record_control_event(t_start, MPI_TESTSOME_TYPE, control_meta_comm(&meta), control_meta_tag(&meta), tracking_my_rank, completed);
     }
 
     free(pre_handles);
     free(temp_statuses);
-
     trace_in_wrapper = 0;
-
     return rc;
 }
-
 
 int MPI_Cancel(MPI_Request *request) {
   return PMPI_Cancel(request);
@@ -1547,99 +1527,97 @@ int MPI_Allreduce(const void *sendbuf, void *recvbuf, int count, MPI_Datatype da
 }
 
 int MPI_Gather(const void *sendbuf, int sendcount, MPI_Datatype sendtype, void *recvbuf, int recvcount, MPI_Datatype recvtype, int root, MPI_Comm comm) {
-  int rc;
-  int root_world = root;
-  int local_world = tracking_my_rank;
-  int comm_size = 1;
-  int aggregate_recvcount = 0;
-  int is_inter = 0;
-  double ts = trace_timestamp();
+    if (trace_in_wrapper) return PMPI_Gather(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, root, comm);
+    trace_in_wrapper = 1;
 
-  if(trace_in_wrapper) return PMPI_Gather(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, root, comm);
-  trace_in_wrapper = 1;
+    int rc;
+    int root_world = root;
+    int local_world = tracking_my_rank;
+    int comm_size = 1;
+    int is_inter = 0;
+    double ts = trace_timestamp();
 
-  rc = PMPI_Gather(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, root, comm);
+    rc = PMPI_Gather(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, root, comm);
 
-  if (rc == MPI_SUCCESS) {
-    if (comm != MPI_COMM_WORLD && comm != MPI_COMM_NULL) {
-      current_world_rank_in_comm(comm, &local_world);
-      translate_comm_rank_to_world(comm, root, 0, &root_world);
-      PMPI_Comm_test_inter(comm, &is_inter);
+    if (rc == MPI_SUCCESS) {
+        if (comm != MPI_COMM_WORLD && comm != MPI_COMM_NULL) {
+            current_world_rank_in_comm(comm, &local_world);
+            translate_comm_rank_to_world(comm, root, 0, &root_world);
+            PMPI_Comm_test_inter(comm, &is_inter);
+        }
+
+        PMPI_Comm_size(comm, &comm_size);
+
+        if (!is_inter && local_world == root_world) {
+            int aggregate_recvcount = safe_mul_to_int(recvcount, comm_size);
+            record_large_event(ts, MPI_GATHER_TYPE, MPI_Comm_c2f(comm), local_world, root_world, recvcount, recvtype, 0, root_world, root_world, aggregate_recvcount, recvtype, 0);
+        } else {
+            record_large_event(ts, MPI_GATHER_TYPE, MPI_Comm_c2f(comm), local_world, root_world, sendcount, sendtype, 0, root_world, root_world, 0, MPI_DATATYPE_NULL, 0);
+        }
     }
 
-    PMPI_Comm_size(comm, &comm_size);
-    if (!is_inter && local_world == root_world) {
-      aggregate_recvcount = safe_mul_to_int(recvcount, comm_size);
-    }
-
-    record_large_event(ts, MPI_GATHER_TYPE, MPI_Comm_c2f(comm), local_world, root_world, sendcount, sendtype, 0, root_world, root_world, aggregate_recvcount, (aggregate_recvcount > 0) ? recvtype : MPI_DATATYPE_NULL, 0);
-  }
-
-  trace_in_wrapper = 0;
-
-  return rc;
+    trace_in_wrapper = 0;
+    return rc;
 }
 
 int MPI_Scatter(const void *sendbuf, int sendcount, MPI_Datatype sendtype, void *recvbuf, int recvcount, MPI_Datatype recvtype, int root, MPI_Comm comm) {
-  int rc;
-  int root_world = root;
-  int local_world = tracking_my_rank;
-  int comm_size = 1;
-  int aggregate_sendcount = 0;
-  int is_inter = 0;
-  double ts = trace_timestamp();
+    if (trace_in_wrapper) return PMPI_Scatter(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, root, comm);
+    trace_in_wrapper = 1;
 
-  if(trace_in_wrapper) return PMPI_Scatter(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, root, comm);
-  trace_in_wrapper = 1;
+    int rc;
+    int root_world = root;
+    int local_world = tracking_my_rank;
+    int comm_size = 1;
+    int is_inter = 0;
+    double ts = trace_timestamp();
 
-  rc = PMPI_Scatter(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, root, comm);
+    rc = PMPI_Scatter(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, root, comm);
 
-  if (rc == MPI_SUCCESS) {
-    if (comm != MPI_COMM_WORLD && comm != MPI_COMM_NULL) {
-      current_world_rank_in_comm(comm, &local_world);
-      translate_comm_rank_to_world(comm, root, 0, &root_world);
-      PMPI_Comm_test_inter(comm, &is_inter);
+    if (rc == MPI_SUCCESS) {
+        if (comm != MPI_COMM_WORLD && comm != MPI_COMM_NULL) {
+            current_world_rank_in_comm(comm, &local_world);
+            translate_comm_rank_to_world(comm, root, 0, &root_world);
+            PMPI_Comm_test_inter(comm, &is_inter);
+        }
+
+        PMPI_Comm_size(comm, &comm_size);
+
+        if (!is_inter && local_world == root_world) {
+            int aggregate_sendcount = safe_mul_to_int(sendcount, comm_size);
+            record_large_event(ts, MPI_SCATTER_TYPE, MPI_Comm_c2f(comm), root_world, root_world, aggregate_sendcount, sendtype, 0, root_world, local_world, sendcount, sendtype, 0);
+        } else {
+            record_large_event(ts, MPI_SCATTER_TYPE, MPI_Comm_c2f(comm), root_world, root_world, 0, MPI_DATATYPE_NULL, 0, root_world, local_world, recvcount, recvtype, 0);
+        }
     }
 
-    PMPI_Comm_size(comm, &comm_size);
-    if (!is_inter && local_world == root_world) {
-      aggregate_sendcount = safe_mul_to_int(sendcount, comm_size);
-    }
-
-    record_large_event(ts, MPI_SCATTER_TYPE, MPI_Comm_c2f(comm), root_world, root_world, aggregate_sendcount, (aggregate_sendcount > 0) ? sendtype : MPI_DATATYPE_NULL, 0, root_world, local_world, recvcount, recvtype, 0);
-  }
-
-  trace_in_wrapper = 0;
-
-  return rc;
+    trace_in_wrapper = 0;
+    return rc;
 }
 
 int MPI_Allgather(const void *sendbuf, int sendcount, MPI_Datatype sendtype, void *recvbuf, int recvcount, MPI_Datatype recvtype, MPI_Comm comm) {
-  int rc;
-  int local_world = tracking_my_rank;
-  int comm_size = 1;
-  int aggregate_recvcount = 0;
-  double ts = trace_timestamp();
+    if (trace_in_wrapper) return PMPI_Allgather(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, comm);
+    trace_in_wrapper = 1;
 
-  if(trace_in_wrapper) return PMPI_Allgather(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, comm);
-  trace_in_wrapper = 1;
+    int rc;
+    int local_world = tracking_my_rank;
+    int comm_size = 1;
+    double ts = trace_timestamp();
 
-  rc = PMPI_Allgather(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, comm);
+    rc = PMPI_Allgather(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, comm);
 
-  if (rc == MPI_SUCCESS) {
-    if (comm != MPI_COMM_WORLD && comm != MPI_COMM_NULL) {
-      current_world_rank_in_comm(comm, &local_world);
+    if (rc == MPI_SUCCESS) {
+        if (comm != MPI_COMM_WORLD && comm != MPI_COMM_NULL) {
+            current_world_rank_in_comm(comm, &local_world);
+        }
+
+        PMPI_Comm_size(comm, &comm_size);
+        
+        int aggregate_recvcount = safe_mul_to_int(recvcount, comm_size);
+        record_large_event(ts, MPI_ALLGATHER_TYPE, MPI_Comm_c2f(comm), local_world, local_world, recvcount, recvtype, 0, local_world, local_world, aggregate_recvcount, recvtype, 0);
     }
 
-    PMPI_Comm_size(comm, &comm_size);
-    aggregate_recvcount = safe_mul_to_int(recvcount, comm_size);
-
-    record_large_event(ts, MPI_ALLGATHER_TYPE, MPI_Comm_c2f(comm), local_world, local_world, sendcount, sendtype, 0, local_world, local_world, aggregate_recvcount, recvtype, 0);
-  }
-
-  trace_in_wrapper = 0;
-
-  return rc;
+    trace_in_wrapper = 0;
+    return rc;
 }
 
 #ifdef MPI_TRACE_ENABLE_FORTRAN_SUPPORT
@@ -1748,15 +1726,53 @@ static int validate_fortran_status_size(const char *wrapper_name,
 /* Fortran Wrappers                                                           */
 /* -------------------------------------------------------------------------- */
 
-void mpi_init_(int *ierr) { int argc = 0; char **argv = NULL; *ierr = MPI_Init(&argc, &argv); }
-void mpi_init__(int *ierr) { mpi_init_(ierr); }
-void mpi_init_f08_(int *ierr) { int argc = 0; char **argv = NULL; *ierr = MPI_Init(&argc, &argv); }
-void MPI_INIT(int *ierr) { mpi_init_(ierr); }
+extern void pmpi_init_(MPI_Fint *ierr);
+extern void pmpi_finalize_(MPI_Fint *ierr);
 
-void mpi_finalize_(int *ierr) { *ierr = MPI_Finalize(); }
-void mpi_finalize__(int *ierr) { mpi_finalize_(ierr); }
-void mpi_finalize_f08_(int *ierr) { *ierr = MPI_Finalize(); }
-void MPI_FINALIZE(int *ierr) { mpi_finalize_(ierr); }
+void mpi_init_(MPI_Fint *ierr) {
+    pmpi_init_(ierr);
+    
+    if (*ierr == MPI_SUCCESS) {
+        *ierr = (MPI_Fint)begin_tracking_runtime();
+    }
+}
+void mpi_init__(MPI_Fint *ierr) { mpi_init_(ierr); }
+void mpi_init_f08_(MPI_Fint *ierr) { mpi_init_(ierr); }
+void MPI_INIT(MPI_Fint *ierr) { mpi_init_(ierr); }
+
+
+void mpi_finalize_(MPI_Fint *ierr) {
+    if (tracking_initialized) {
+        if (trace_in_wrapper) { 
+            pmpi_finalize_(ierr); 
+            return; 
+        }
+        trace_in_wrapper = 1;
+
+        double ts = trace_timestamp();
+        record_small_event(ts, MPI_FINALIZE_TYPE, MPI_Comm_c2f(MPI_COMM_WORLD), 0, tracking_my_rank, tracking_my_rank, 0, MPI_DATATYPE_NULL);
+
+        if (current_backend && current_backend->finalize_backend) {
+            current_backend->finalize_backend();
+        }
+
+        if (world_group != MPI_GROUP_NULL) {
+            PMPI_Group_free(&world_group);
+            world_group = MPI_GROUP_NULL;
+        }
+
+        free_pending_request_list();
+        tracking_initialized = 0;
+        
+        trace_in_wrapper = 0;
+    }
+    
+    pmpi_finalize_(ierr);
+}
+void mpi_finalize__(MPI_Fint *ierr) { mpi_finalize_(ierr); }
+void mpi_finalize_f08_(MPI_Fint *ierr) { mpi_finalize_(ierr); }
+void MPI_FINALIZE(MPI_Fint *ierr) { mpi_finalize_(ierr); }
+
 
 void mpi_send_(const void *buf, MPI_Fint *count, MPI_Fint *datatype, MPI_Fint *dest, MPI_Fint *tag, MPI_Fint *comm, MPI_Fint *ierr) {
   *ierr = (MPI_Fint)MPI_Send(buf, (int)*count, PMPI_Type_f2c(*datatype), (int)*dest, (int)*tag, MPI_Comm_f2c(*comm));
@@ -1845,20 +1861,165 @@ void MPI_IRECV(void *buf, MPI_Fint *count, MPI_Fint *datatype, MPI_Fint *source,
   mpi_irecv_(buf, count, datatype, source, tag, comm, request, ierr);
 }
 
+// To handle MPI_STATUS_IGNORE and similar flags we pass through to the underlying Fortran
+// implementation and do the tracking here, rather than call our existing C versions that do
+// the tracking already. 
 void mpi_wait_(MPI_Fint *request, MPI_Fint *status, MPI_Fint *ierr) {
-  MPI_Request c_req = (request != NULL) ? PMPI_Request_f2c(*request) : MPI_REQUEST_NULL;
-  MPI_Status c_status;
-#ifdef MPI_F_STATUS_IGNORE
-  MPI_Status *c_status_ptr = (status == MPI_F_STATUS_IGNORE) ? MPI_STATUS_IGNORE : &c_status;
-#else
-  MPI_Status *c_status_ptr = &c_status;
-#endif
-  *ierr = (MPI_Fint)MPI_Wait(&c_req, c_status_ptr);
-  if (request != NULL) *request = PMPI_Request_c2f(c_req);
-  if (c_status_ptr != MPI_STATUS_IGNORE && status != NULL) MPI_Status_c2f(&c_status, status);
+    if (trace_in_wrapper) { pmpi_wait_(request, status, ierr); return; }
+    trace_in_wrapper = 1;
+
+    MPI_Request pre_handle = MPI_REQUEST_NULL;
+    pending_request_t *tracked = NULL;
+    request_meta_t meta = {0, 0, 0};
+    double t_start = trace_timestamp();
+    double t_end;
+
+    // Capture handle before PMPI zeros it out
+    if (request != NULL) pre_handle = PMPI_Request_f2c(*request);
+    tracked = find_pending_request(pre_handle);
+
+    pmpi_wait_(request, status, ierr);
+    t_end = trace_timestamp();
+
+    if (*ierr == MPI_SUCCESS && tracked != NULL) {
+        pending_request_t *detached = detach_pending_request(pre_handle);
+        if (detached != NULL) {
+            meta = request_meta_from_req(detached);
+            // Status omitted safely; worst case we miss ANY_SOURCE dynamic counts
+            complete_pending_request(detached, NULL, 0, t_end);
+        }
+        record_control_event(t_start, MPI_WAIT_TYPE, meta.valid ? meta.comm_id : 0, meta.valid ? meta.tag : 0, tracking_my_rank, 1);
+    }
+    trace_in_wrapper = 0;
 }
 void mpi_wait__(MPI_Fint *request, MPI_Fint *status, MPI_Fint *ierr) { mpi_wait_(request, status, ierr); }
 void MPI_WAIT(MPI_Fint *request, MPI_Fint *status, MPI_Fint *ierr) { mpi_wait_(request, status, ierr); }
+
+void mpi_waitall_(MPI_Fint *count, MPI_Fint array_of_requests[], MPI_Fint array_of_statuses[], MPI_Fint *ierr) {
+    if (trace_in_wrapper) { pmpi_waitall_(count, array_of_requests, array_of_statuses, ierr); return; }
+    trace_in_wrapper = 1;
+
+    int i;
+    int n = (int)*count;
+    int completed = 0;
+    MPI_Request *pre_handles = NULL;
+    control_meta_t meta;
+    double t_start = trace_timestamp();
+    double t_end;
+
+    control_meta_init(&meta);
+
+    if (n > 0) {
+        pre_handles = (MPI_Request *)malloc((size_t)n * sizeof(MPI_Request));
+        if (pre_handles != NULL) {
+            for (i = 0; i < n; i++) pre_handles[i] = PMPI_Request_f2c(array_of_requests[i]);
+        }
+    }
+
+    pmpi_waitall_(count, array_of_requests, array_of_statuses, ierr);
+    t_end = trace_timestamp();
+
+    if (*ierr == MPI_SUCCESS && pre_handles != NULL) {
+        for (i = 0; i < n; i++) {
+            pending_request_t *tracked = detach_pending_request(pre_handles[i]);
+            if (tracked != NULL) {
+                control_meta_note(&meta, tracked);
+                complete_pending_request(tracked, NULL, 0, t_end);
+                completed++;
+            }
+        }
+        record_control_event(t_start, MPI_WAITALL_TYPE, control_meta_comm(&meta), control_meta_tag(&meta), tracking_my_rank, completed);
+    }
+
+    free(pre_handles);
+    trace_in_wrapper = 0;
+}
+void mpi_waitall__(MPI_Fint *count, MPI_Fint array_of_requests[], MPI_Fint array_of_statuses[], MPI_Fint *ierr) { mpi_waitall_(count, array_of_requests, array_of_statuses, ierr); }
+void MPI_WAITALL(MPI_Fint *count, MPI_Fint array_of_requests[], MPI_Fint array_of_statuses[], MPI_Fint *ierr) { mpi_waitall_(count, array_of_requests, array_of_statuses, ierr); }
+
+void mpi_waitany_(MPI_Fint *count, MPI_Fint array_of_requests[], MPI_Fint *index, MPI_Fint *status, MPI_Fint *ierr) {
+    if (trace_in_wrapper) { pmpi_waitany_(count, array_of_requests, index, status, ierr); return; }
+    trace_in_wrapper = 1;
+
+    int i;
+    int n = (int)*count;
+    MPI_Request *pre_handles = NULL;
+    request_meta_t meta = {0, 0, 0};
+    double t_start = trace_timestamp();
+    double t_end;
+
+    if (n > 0) {
+        pre_handles = (MPI_Request *)malloc((size_t)n * sizeof(MPI_Request));
+        if (pre_handles != NULL) {
+            for (i = 0; i < n; i++) pre_handles[i] = PMPI_Request_f2c(array_of_requests[i]);
+        }
+    }
+
+    pmpi_waitany_(count, array_of_requests, index, status, ierr);
+    t_end = trace_timestamp();
+
+    if (*ierr == MPI_SUCCESS && pre_handles != NULL && index != NULL && *index != (MPI_Fint)MPI_UNDEFINED) {
+        int c_index = (int)(*index) - 1; // Fortran arrays are 1-based, map to 0-based
+        if (c_index >= 0 && c_index < n) {
+            pending_request_t *tracked = detach_pending_request(pre_handles[c_index]);
+            if (tracked != NULL) {
+                meta = request_meta_from_req(tracked);
+                complete_pending_request(tracked, NULL, 0, t_end);
+            }
+        }
+        record_control_event(t_start, MPI_WAITANY_TYPE, meta.valid ? meta.comm_id : 0, meta.valid ? meta.tag : 0, tracking_my_rank, 1);
+    }
+
+    free(pre_handles);
+    trace_in_wrapper = 0;
+}
+void mpi_waitany__(MPI_Fint *count, MPI_Fint array_of_requests[], MPI_Fint *index, MPI_Fint *status, MPI_Fint *ierr) { mpi_waitany_(count, array_of_requests, index, status, ierr); }
+void MPI_WAITANY(MPI_Fint *count, MPI_Fint array_of_requests[], MPI_Fint *index, MPI_Fint *status, MPI_Fint *ierr) { mpi_waitany_(count, array_of_requests, index, status, ierr); }
+
+void mpi_waitsome_(MPI_Fint *incount, MPI_Fint array_of_requests[], MPI_Fint *outcount, MPI_Fint array_of_indices[], MPI_Fint array_of_statuses[], MPI_Fint *ierr) {
+    if (trace_in_wrapper) { pmpi_waitsome_(incount, array_of_requests, outcount, array_of_indices, array_of_statuses, ierr); return; }
+    trace_in_wrapper = 1;
+
+    int i;
+    int n = (int)*incount;
+    int completed = 0;
+    MPI_Request *pre_handles = NULL;
+    control_meta_t meta;
+    double t_start = trace_timestamp();
+    double t_end;
+
+    control_meta_init(&meta);
+
+    if (n > 0) {
+        pre_handles = (MPI_Request *)malloc((size_t)n * sizeof(MPI_Request));
+        if (pre_handles != NULL) {
+            for (i = 0; i < n; i++) pre_handles[i] = PMPI_Request_f2c(array_of_requests[i]);
+        }
+    }
+
+    pmpi_waitsome_(incount, array_of_requests, outcount, array_of_indices, array_of_statuses, ierr);
+    t_end = trace_timestamp();
+
+    if (*ierr == MPI_SUCCESS && pre_handles != NULL && outcount != NULL && *outcount != (MPI_Fint)MPI_UNDEFINED && *outcount > 0) {
+        for (i = 0; i < (int)*outcount; i++) {
+            int c_index = (int)(array_of_indices[i]) - 1; // Fortran arrays are 1-based, map to 0-based
+            if (c_index >= 0 && c_index < n) {
+                pending_request_t *tracked = detach_pending_request(pre_handles[c_index]);
+                if (tracked != NULL) {
+                    control_meta_note(&meta, tracked);
+                    complete_pending_request(tracked, NULL, 0, t_end);
+                    completed++;
+                }
+            }
+        }
+        record_control_event(t_start, MPI_WAITSOME_TYPE, control_meta_comm(&meta), control_meta_tag(&meta), tracking_my_rank, completed);
+    }
+
+    free(pre_handles);
+    trace_in_wrapper = 0;
+}
+void mpi_waitsome__(MPI_Fint *incount, MPI_Fint array_of_requests[], MPI_Fint *outcount, MPI_Fint array_of_indices[], MPI_Fint array_of_statuses[], MPI_Fint *ierr) { mpi_waitsome_(incount, array_of_requests, outcount, array_of_indices, array_of_statuses, ierr); }
+void MPI_WAITSOME(MPI_Fint *incount, MPI_Fint array_of_requests[], MPI_Fint *outcount, MPI_Fint array_of_indices[], MPI_Fint array_of_statuses[], MPI_Fint *ierr) { mpi_waitsome_(incount, array_of_requests, outcount, array_of_indices, array_of_statuses, ierr); }
 
 void mpi_test_(MPI_Fint *request, int *flag, MPI_Fint *status, MPI_Fint *ierr) {
   MPI_Request c_req = (request != NULL) ? PMPI_Request_f2c(*request) : MPI_REQUEST_NULL;
@@ -1876,210 +2037,6 @@ void mpi_test_(MPI_Fint *request, int *flag, MPI_Fint *status, MPI_Fint *ierr) {
 }
 void mpi_test__(MPI_Fint *request, int *flag, MPI_Fint *status, MPI_Fint *ierr) { mpi_test_(request, flag, status, ierr); }
 void MPI_TEST(MPI_Fint *request, int *flag, MPI_Fint *status, MPI_Fint *ierr) { mpi_test_(request, flag, status, ierr); }
-
-void mpi_waitall_(MPI_Fint *count, MPI_Fint array_of_requests[], MPI_Fint array_of_statuses[], MPI_Fint *ierr) {
-  int i;
-  int n = (int)*count;
-  MPI_Request *c_requests = NULL;
-  MPI_Status *c_statuses = NULL;
-  MPI_Status *c_status_ptr = MPI_STATUSES_IGNORE;
-
-  if (n > 0) {
-    c_requests = (MPI_Request *)malloc((size_t)n * sizeof(MPI_Request));
-    if (c_requests == NULL) {
-      *ierr = (MPI_Fint)MPI_ERR_NO_MEM;
-      return;
-    }
-
-    for (i = 0; i < n; i++) {
-      c_requests[i] = PMPI_Request_f2c(array_of_requests[i]);
-    }
-
-    if (array_of_statuses != NULL && !fortran_statuses_are_ignore(array_of_statuses)) {
-      c_statuses = (MPI_Status *)malloc((size_t)n * sizeof(MPI_Status));
-      if (c_statuses == NULL) {
-	free(c_requests);
-	*ierr = (MPI_Fint)MPI_ERR_NO_MEM;
-	return;
-      }
-      c_status_ptr = c_statuses;
-    }
-  }
-
-  // Call the C wrapper so telemetry logic is triggered 
-  *ierr = (MPI_Fint)MPI_Waitall(n, c_requests, c_status_ptr);
-
-  if (n > 0) {
-    for (i = 0; i < n; i++) {
-      array_of_requests[i] = PMPI_Request_c2f(c_requests[i]);
-    }
-
-    if (c_status_ptr != MPI_STATUSES_IGNORE && array_of_statuses != NULL) {
-      int f_status_size = 0;
-
-      if (!validate_fortran_status_size("mpi_waitall_", &f_status_size, ierr)) {
-	free(c_requests);
-	free(c_statuses);
-	return;
-      } 
-      for (i = 0; i < n; i++) {
-	MPI_Status_c2f(&c_statuses[i], &array_of_statuses[i * f_status_size]);
-      }
-    }
-  }
-
-  free(c_requests);
-  free(c_statuses);
-}
-
-void mpi_waitall__(MPI_Fint *count, MPI_Fint array_of_requests[], MPI_Fint array_of_statuses[], MPI_Fint *ierr) {
-  mpi_waitall_(count, array_of_requests, array_of_statuses, ierr);
-}
-
-void MPI_WAITALL(MPI_Fint *count, MPI_Fint array_of_requests[], MPI_Fint array_of_statuses[], MPI_Fint *ierr) {
-  mpi_waitall_(count, array_of_requests, array_of_statuses, ierr);
-}
-
-
-void mpi_waitany_(MPI_Fint *count, MPI_Fint array_of_requests[], MPI_Fint *index, MPI_Fint *status, MPI_Fint *ierr) {
-  int i;
-  int n = (int)*count;
-  int c_index = MPI_UNDEFINED;
-  MPI_Request *c_requests = NULL;
-  MPI_Status c_status;
-  MPI_Status *c_status_ptr = MPI_STATUS_IGNORE;
-
-  if (n > 0) {
-    c_requests = (MPI_Request *)malloc((size_t)n * sizeof(MPI_Request));
-    if (c_requests == NULL) {
-      *ierr = (MPI_Fint)MPI_ERR_NO_MEM;
-      return;
-    }
-
-    for (i = 0; i < n; i++) {
-      c_requests[i] = PMPI_Request_f2c(array_of_requests[i]);
-    }
-  }
-
-  if (status != NULL && !fortran_status_is_ignore(status)) {
-    c_status_ptr = &c_status;
-  }
-
-  *ierr = (MPI_Fint)MPI_Waitany(n, c_requests, &c_index, c_status_ptr);
-
-  if (n > 0) {
-    for (i = 0; i < n; i++) {
-      array_of_requests[i] = PMPI_Request_c2f(c_requests[i]);
-    }
-  }
-
-  if (index != NULL) {
-    if (c_index == MPI_UNDEFINED) {
-      *index = (MPI_Fint)MPI_UNDEFINED;
-    } else {
-      *index = (MPI_Fint)(c_index + 1);
-    }
-  }
-
-  if (c_status_ptr != MPI_STATUS_IGNORE && status != NULL && c_index != MPI_UNDEFINED) {
-    MPI_Status_c2f(&c_status, status);
-  }
-
-  free(c_requests);
-}
-
-void mpi_waitany__(MPI_Fint *count, MPI_Fint array_of_requests[], MPI_Fint *index, MPI_Fint *status, MPI_Fint *ierr) {
-  mpi_waitany_(count, array_of_requests, index, status, ierr);
-}
-
-void MPI_WAITANY(MPI_Fint *count, MPI_Fint array_of_requests[], MPI_Fint *index, MPI_Fint *status, MPI_Fint *ierr) {
-  mpi_waitany_(count, array_of_requests, index, status, ierr);
-}
-
-
-void mpi_waitsome_(MPI_Fint *incount, MPI_Fint array_of_requests[], MPI_Fint *outcount, MPI_Fint array_of_indices[], MPI_Fint array_of_statuses[], MPI_Fint *ierr) {
-  int i;
-  int n = (int)*incount;
-  int c_outcount = MPI_UNDEFINED;
-  MPI_Request *c_requests = NULL;
-  int *c_indices = NULL;
-  MPI_Status *c_statuses = NULL;
-  MPI_Status *c_status_ptr = MPI_STATUSES_IGNORE;
-
-  if (n > 0) {
-    c_requests = (MPI_Request *)malloc((size_t)n * sizeof(MPI_Request));
-    c_indices = (int *)malloc((size_t)n * sizeof(int));
-
-    if (c_requests == NULL || c_indices == NULL) {
-      free(c_requests);
-      free(c_indices);
-      *ierr = (MPI_Fint)MPI_ERR_NO_MEM;
-      return;
-    }
-
-    for (i = 0; i < n; i++) {
-      c_requests[i] = PMPI_Request_f2c(array_of_requests[i]);
-    }
-
-    if (array_of_statuses != NULL && !fortran_statuses_are_ignore(array_of_statuses)) {
-      c_statuses = (MPI_Status *)malloc((size_t)n * sizeof(MPI_Status));
-      if (c_statuses == NULL) {
-	free(c_requests);
-	free(c_indices);
-	*ierr = (MPI_Fint)MPI_ERR_NO_MEM;
-	return;
-      }
-      c_status_ptr = c_statuses;
-    }
-  }
-
-  *ierr = (MPI_Fint)MPI_Waitsome(n, c_requests, &c_outcount, c_indices, c_status_ptr);
-
-  if (n > 0) {
-    for (i = 0; i < n; i++) {
-      array_of_requests[i] = PMPI_Request_c2f(c_requests[i]);
-    }
-  }
-
-  if (outcount != NULL) {
-    *outcount = (MPI_Fint)c_outcount;
-  }
-
-  if (c_outcount != MPI_UNDEFINED && c_outcount > 0) {
-    int f_status_size = 0;
-
-    if (c_status_ptr != MPI_STATUSES_IGNORE && array_of_statuses != NULL) {
-      if (!validate_fortran_status_size("mpi_waitsome_", &f_status_size, ierr)) {
-	free(c_requests);
-	free(c_indices);
-	free(c_statuses);
-	return;
-      }
-    }
-    for (i = 0; i < c_outcount; i++) {
-      if (array_of_indices != NULL) {
-	array_of_indices[i] = (MPI_Fint)(c_indices[i] + 1);
-      }
-
-      if (c_status_ptr != MPI_STATUSES_IGNORE && array_of_statuses != NULL) {
-	MPI_Status_c2f(&c_statuses[i], &array_of_statuses[i * f_status_size]);
-      }
-    }
-  }
-
-  free(c_requests);
-  free(c_indices);
-  free(c_statuses);
-}
-
-void mpi_waitsome__(MPI_Fint *incount, MPI_Fint array_of_requests[], MPI_Fint *outcount, MPI_Fint array_of_indices[], MPI_Fint array_of_statuses[], MPI_Fint *ierr) {
-  mpi_waitsome_(incount, array_of_requests, outcount, array_of_indices, array_of_statuses, ierr);
-}
-
-void MPI_WAITSOME(MPI_Fint *incount, MPI_Fint array_of_requests[], MPI_Fint *outcount, MPI_Fint array_of_indices[], MPI_Fint array_of_statuses[], MPI_Fint *ierr) {
-  mpi_waitsome_(incount, array_of_requests, outcount, array_of_indices, array_of_statuses, ierr);
-}
-
 
 void mpi_testall_(MPI_Fint *count, MPI_Fint array_of_requests[], int *flag, MPI_Fint array_of_statuses[], MPI_Fint *ierr) {
   int i;
@@ -2340,7 +2297,7 @@ void MPI_BCAST(void *buffer, MPI_Fint *count, MPI_Fint *datatype, MPI_Fint *root
 void mpi_reduce_(const void *sendbuf, void *recvbuf, MPI_Fint *count, MPI_Fint *datatype, MPI_Fint *op, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *ierr) {
     if (trace_in_wrapper) {
         pmpi_reduce_(sendbuf, recvbuf, count, datatype, op, root, comm, ierr);
-        return;
+	return;
     }
     trace_in_wrapper = 1;
 
@@ -2388,16 +2345,12 @@ void mpi_allreduce__(const void *sendbuf, void *recvbuf, MPI_Fint *count, MPI_Fi
 void MPI_ALLREDUCE(const void *sendbuf, void *recvbuf, MPI_Fint *count, MPI_Fint *datatype, MPI_Fint *op, MPI_Fint *comm, MPI_Fint *ierr) { mpi_allreduce_(sendbuf, recvbuf, count, datatype, op, comm, ierr); }
 
 void mpi_gather_(const void *sendbuf, MPI_Fint *sendcount, MPI_Fint *sendtype, void *recvbuf, MPI_Fint *recvcount, MPI_Fint *recvtype, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *ierr) {
-    if (trace_in_wrapper) {
-        pmpi_gather_(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, root, comm, ierr);
-        return;
-    }
+    if (trace_in_wrapper) { pmpi_gather_(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, root, comm, ierr); return; }
     trace_in_wrapper = 1;
 
     int local_world = tracking_my_rank;
     int root_world = (int)*root;
     int comm_size = 1;
-    int aggregate_recvcount = 0;
     int is_inter = 0;
     double ts = trace_timestamp();
 
@@ -2413,34 +2366,27 @@ void mpi_gather_(const void *sendbuf, MPI_Fint *sendcount, MPI_Fint *sendtype, v
 
         PMPI_Comm_size(c_comm, &comm_size);
 
-        MPI_Datatype c_recvtype = MPI_DATATYPE_NULL;
-
         if (!is_inter && local_world == root_world) {
-            aggregate_recvcount = safe_mul_to_int((int)*recvcount, comm_size);
-            c_recvtype = PMPI_Type_f2c(*recvtype);
+            int aggregate_recvcount = safe_mul_to_int((int)*recvcount, comm_size);
+            MPI_Datatype c_recvtype = PMPI_Type_f2c(*recvtype);
+            record_large_event(ts, MPI_GATHER_TYPE, (int)*comm, local_world, root_world, (int)*recvcount, c_recvtype, 0, root_world, root_world, aggregate_recvcount, c_recvtype, 0);
+        } else {
+            MPI_Datatype c_sendtype = PMPI_Type_f2c(*sendtype);
+            record_large_event(ts, MPI_GATHER_TYPE, (int)*comm, local_world, root_world, (int)*sendcount, c_sendtype, 0, root_world, root_world, 0, MPI_DATATYPE_NULL, 0);
         }
-
-        MPI_Datatype c_sendtype = PMPI_Type_f2c(*sendtype);
-
-        record_large_event(ts, MPI_GATHER_TYPE, (int)*comm, local_world, root_world, (int)*sendcount, c_sendtype, 0, root_world, root_world, aggregate_recvcount, c_recvtype, 0);
     }
     trace_in_wrapper = 0;
 }
-
-void mpi_gather__(const void *sendbuf, MPI_Fint *sendcount, MPI_Fint *sendtype, void *recvbuf, MPI_Fint *recvcount, MPI_Fint *recvtype, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *ierr) {  mpi_gather_(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, root, comm, ierr); }
+void mpi_gather__(const void *sendbuf, MPI_Fint *sendcount, MPI_Fint *sendtype, void *recvbuf, MPI_Fint *recvcount, MPI_Fint *recvtype, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *ierr) { mpi_gather_(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, root, comm, ierr); }
 void MPI_GATHER(const void *sendbuf, MPI_Fint *sendcount, MPI_Fint *sendtype, void *recvbuf, MPI_Fint *recvcount, MPI_Fint *recvtype, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *ierr) { mpi_gather_(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, root, comm, ierr); }
 
 void mpi_scatter_(const void *sendbuf, MPI_Fint *sendcount, MPI_Fint *sendtype, void *recvbuf, MPI_Fint *recvcount, MPI_Fint *recvtype, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *ierr) {
-    if (trace_in_wrapper) {
-        pmpi_scatter_(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, root, comm, ierr);
-        return;
-    }
+    if (trace_in_wrapper) { pmpi_scatter_(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, root, comm, ierr); return; }
     trace_in_wrapper = 1;
 
     int local_world = tracking_my_rank;
     int root_world = (int)*root;
     int comm_size = 1;
-    int aggregate_sendcount = 0;
     int is_inter = 0;
     double ts = trace_timestamp();
 
@@ -2456,33 +2402,26 @@ void mpi_scatter_(const void *sendbuf, MPI_Fint *sendcount, MPI_Fint *sendtype, 
 
         PMPI_Comm_size(c_comm, &comm_size);
 
-        MPI_Datatype c_sendtype = MPI_DATATYPE_NULL;
-
         if (!is_inter && local_world == root_world) {
-            aggregate_sendcount = safe_mul_to_int((int)*sendcount, comm_size);
-            c_sendtype = PMPI_Type_f2c(*sendtype);
+            int aggregate_sendcount = safe_mul_to_int((int)*sendcount, comm_size);
+            MPI_Datatype c_sendtype = PMPI_Type_f2c(*sendtype);
+            record_large_event(ts, MPI_SCATTER_TYPE, (int)*comm, root_world, root_world, aggregate_sendcount, c_sendtype, 0, root_world, local_world, (int)*sendcount, c_sendtype, 0);
+        } else {
+            MPI_Datatype c_recvtype = PMPI_Type_f2c(*recvtype);
+            record_large_event(ts, MPI_SCATTER_TYPE, (int)*comm, root_world, root_world, 0, MPI_DATATYPE_NULL, 0, root_world, local_world, (int)*recvcount, c_recvtype, 0);
         }
-
-        MPI_Datatype c_recvtype = PMPI_Type_f2c(*recvtype);
-
-        record_large_event(ts, MPI_SCATTER_TYPE, (int)*comm, root_world, root_world, aggregate_sendcount, c_sendtype, 0, root_world, local_world, (int)*recvcount, c_recvtype, 0);
     }
     trace_in_wrapper = 0;
 }
-
 void mpi_scatter__(const void *sendbuf, MPI_Fint *sendcount, MPI_Fint *sendtype, void *recvbuf, MPI_Fint *recvcount, MPI_Fint *recvtype, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *ierr) { mpi_scatter_(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, root, comm, ierr); }
 void MPI_SCATTER(const void *sendbuf, MPI_Fint *sendcount, MPI_Fint *sendtype, void *recvbuf, MPI_Fint *recvcount, MPI_Fint *recvtype, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *ierr) { mpi_scatter_(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, root, comm, ierr); }
 
 void mpi_allgather_(const void *sendbuf, MPI_Fint *sendcount, MPI_Fint *sendtype, void *recvbuf, MPI_Fint *recvcount, MPI_Fint *recvtype, MPI_Fint *comm, MPI_Fint *ierr) {
-    if (trace_in_wrapper) {
-        pmpi_allgather_(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, comm, ierr);
-        return;
-    }
+    if (trace_in_wrapper) { pmpi_allgather_(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, comm, ierr); return; }
     trace_in_wrapper = 1;
 
     int local_world = tracking_my_rank;
     int comm_size = 1;
-    int aggregate_recvcount = 0;
     double ts = trace_timestamp();
 
     pmpi_allgather_(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, comm, ierr);
@@ -2494,16 +2433,13 @@ void mpi_allgather_(const void *sendbuf, MPI_Fint *sendcount, MPI_Fint *sendtype
         }
 
         PMPI_Comm_size(c_comm, &comm_size);
-        aggregate_recvcount = safe_mul_to_int((int)*recvcount, comm_size);
-
-        MPI_Datatype c_sendtype = PMPI_Type_f2c(*sendtype);
+        int aggregate_recvcount = safe_mul_to_int((int)*recvcount, comm_size);
+        
         MPI_Datatype c_recvtype = PMPI_Type_f2c(*recvtype);
-
-        record_large_event(ts, MPI_ALLGATHER_TYPE, (int)*comm, local_world, local_world, (int)*sendcount, c_sendtype, 0, local_world, local_world, aggregate_recvcount, c_recvtype, 0);
+        record_large_event(ts, MPI_ALLGATHER_TYPE, (int)*comm, local_world, local_world, (int)*recvcount, c_recvtype, 0, local_world, local_world, aggregate_recvcount, c_recvtype, 0);
     }
     trace_in_wrapper = 0;
 }
-
 void mpi_allgather__(const void *sendbuf, MPI_Fint *sendcount, MPI_Fint *sendtype, void *recvbuf, MPI_Fint *recvcount, MPI_Fint *recvtype, MPI_Fint *comm, MPI_Fint *ierr) { mpi_allgather_(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, comm, ierr); }
 void MPI_ALLGATHER(const void *sendbuf, MPI_Fint *sendcount, MPI_Fint *sendtype, void *recvbuf, MPI_Fint *recvcount, MPI_Fint *recvtype, MPI_Fint *comm, MPI_Fint *ierr) { mpi_allgather_(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, comm, ierr); }
 
