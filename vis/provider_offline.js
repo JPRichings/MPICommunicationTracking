@@ -51,48 +51,131 @@ const OfflineProvider = {
             console.error(error);
         }
     }, 
-
-
+   
     ensureValidTopology: function() {
         const metadata = this.parsedData.metadata || this.parsedData.info || {};
         const totalRanks = metadata.total_ranks || 0;
 
-        // If topology is completely missing, create a barebones list
+        // If topology is completely missing, create a realistic fallback
+	// This topology isn't the system map that can be provided, this is the 
+	// information for the individual processes that should be collected at runtime.
+	// Really we should fix this in the parser rather than faking it here.
+	// TODO: Move to the parser.
         if (!this.parsedData.topology || this.parsedData.topology.length === 0) {
             this.parsedData.topology = [];
             for (let i = 0; i < totalRanks; i++) {
-                this.parsedData.topology.push({ rank: i, hostname: `rank-${i}` });
+                this.parsedData.topology.push({ 
+                    rank: i, 
+                    hostname: `node-${Math.floor(i / 128)}`,
+                    chip: Math.floor((i % 128) / 64),
+                    core: i % 64
+                });
             }
         }
 
-        // If the blueprint is missing, the nodes are likely unmapped.
-        // We calculate a square grid to make it visually readable.
+        // Build the visual Blueprint
         if (!this.parsedData.hardware_blueprint) {
-            const cols = Math.ceil(Math.sqrt(totalRanks > 0 ? totalRanks : 1));
-            const spacing = 30; // Grid spacing multiplier
+            const hostMap = new Map();
 
-            this.parsedData.topology.forEach((node, i) => {
-                const row = Math.floor(i / cols);
-                const col = i % cols;
-                // Overwrite coordinates to form a square grid
-                node.x = col * spacing;
-                node.y = 0;
-                node.z = row * spacing;
+            // Group all ranks by their actual Hostname, then by Chip
+            this.parsedData.topology.forEach(rankObj => {
+                let host = rankObj.hostname;
+                // Clean up any generic/missing hostnames safely
+                if (!host || host.startsWith("rank-")) {
+                    host = `node-${Math.floor(rankObj.rank / 128)}`;
+                    rankObj.hostname = host; 
+                }
+
+                if (!hostMap.has(host)) {
+                    hostMap.set(host, { hostName: host, chips: new Map() });
+                }
+                
+                // Extract chip ID safely
+                let chipId = (rankObj.chip !== undefined && rankObj.chip !== null && rankObj.chip >= 0) ? rankObj.chip : 0;
+                
+                const hostNode = hostMap.get(host);
+                if (!hostNode.chips.has(chipId)) {
+                    hostNode.chips.set(chipId, []);
+                }
+                hostNode.chips.get(chipId).push(rankObj);
             });
 
-            // Stub out a generic blueprint so VisualiserCore doesn't crash
+            const uniqueHosts = Array.from(hostMap.values());
+            const numHosts = uniqueHosts.length;
+            const hostCols = Math.ceil(Math.sqrt(numHosts > 0 ? numHosts : 1));
+            
+            const hostSpacing = 80;  // Spacing between physical host nodes
+            const chipSpacing = 30;  // Spacing between sockets/chips inside a host
+            const coreSpacing = 3.0; // Spacing between individual cores
+            const coresPerRow = 8;   // Organizes cores into an 8-wide matrix
+
+            const blueprintNodes = [];
+
+            // Lay out the physical host machines
+            uniqueHosts.forEach((hostObj, hostIndex) => {
+                const hostRow = Math.floor(hostIndex / hostCols);
+                const hostCol = hostIndex % hostCols;
+                
+                const hostX = hostCol * hostSpacing;
+                const hostZ = hostRow * hostSpacing;
+
+                // Create the physical machine in the blueprint (The Transparent Box)
+                blueprintNodes.push({
+                    hostname: hostObj.hostName, // Must match rankObj.hostname exactly
+                    slot: hostIndex,
+                    x_offset: hostX,
+                    y_offset: 0,
+                    z_offset: hostZ
+                });
+
+                const chips = Array.from(hostObj.chips.entries()).sort((a, b) => a[0] - b[0]);
+                const numChips = chips.length;
+                const chipCols = Math.ceil(Math.sqrt(numChips > 0 ? numChips : 1));
+
+                // Lay out the chips inside the host
+                chips.forEach(([chipId, ranks], chipIndex) => {
+                    const chipRow = Math.floor(chipIndex / chipCols);
+                    const chipCol = chipIndex % chipCols;
+                    
+                    const chipLocalX = (chipCol - (chipCols - 1) / 2.0) * chipSpacing;
+                    const chipLocalZ = (chipRow - (Math.ceil(numChips / chipCols) - 1) / 2.0) * chipSpacing;
+
+                    // Sort ranks by core ID
+                    ranks.sort((a, b) => {
+                        const coreA = (a.core !== undefined && a.core !== null) ? a.core : a.rank;
+                        const coreB = (b.core !== undefined && b.core !== null) ? b.core : b.rank;
+                        return coreA - coreB;
+                    });
+
+                    // Assign absolute spatial coordinates to the individual cores (Solid Cubes)
+                    ranks.forEach((rankObj, coreIdx) => {
+                        const coreRow = Math.floor(coreIdx / coresPerRow);
+                        const coreCol = coreIdx % coresPerRow;
+
+                        const coreLocalX = (coreCol - (coresPerRow - 1) / 2.0) * coreSpacing;
+                        const coreLocalY = coreRow * coreSpacing; // Stack vertically
+
+                        const localX = chipLocalX + coreLocalX;
+                        const localY = coreLocalY; 
+                        const localZ = chipLocalZ;
+
+                        rankObj.x = hostX + localX;
+                        rankObj.y = localY;
+                        rankObj.z = hostZ + localZ;
+                    });
+                });
+            });
+
+            // Hand the properly structured hierarchy to the visualizer
             this.parsedData.hardware_blueprint = {
-                metadata: { system_name: "Generic Grid Topology" },
+                metadata: { system_name: "Hardware-Mapped Topology" },
                 cabinets: [{
-                    id: "Auto-Generated-Cluster",
+                    id: "Auto-Cabinet",
                     x: 0, y: 0, z: 0,
                     racks: [{
                         id: "Auto-Rack",
-                        nodes: this.parsedData.topology.map(n => ({
-                            hostname: n.hostname,
-                            x_offset: n.x,
-                            slot: n.rank
-                        }))
+                        x_offset: 0, z_offset: 0,
+                        nodes: blueprintNodes // The physical machines
                     }]
                 }]
             };
