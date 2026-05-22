@@ -52,6 +52,53 @@ const OfflineProvider = {
         }
     }, 
 
+
+    ensureValidTopology: function() {
+        const metadata = this.parsedData.metadata || this.parsedData.info || {};
+        const totalRanks = metadata.total_ranks || 0;
+
+        // If topology is completely missing, create a barebones list
+        if (!this.parsedData.topology || this.parsedData.topology.length === 0) {
+            this.parsedData.topology = [];
+            for (let i = 0; i < totalRanks; i++) {
+                this.parsedData.topology.push({ rank: i, hostname: `rank-${i}` });
+            }
+        }
+
+        // If the blueprint is missing, the nodes are likely unmapped.
+        // We calculate a square grid to make it visually readable.
+        if (!this.parsedData.hardware_blueprint) {
+            const cols = Math.ceil(Math.sqrt(totalRanks > 0 ? totalRanks : 1));
+            const spacing = 30; // Grid spacing multiplier
+
+            this.parsedData.topology.forEach((node, i) => {
+                const row = Math.floor(i / cols);
+                const col = i % cols;
+                // Overwrite coordinates to form a square grid
+                node.x = col * spacing;
+                node.y = 0;
+                node.z = row * spacing;
+            });
+
+            // Stub out a generic blueprint so VisualiserCore doesn't crash
+            this.parsedData.hardware_blueprint = {
+                metadata: { system_name: "Generic Grid Topology" },
+                cabinets: [{
+                    id: "Auto-Generated-Cluster",
+                    x: 0, y: 0, z: 0,
+                    racks: [{
+                        id: "Auto-Rack",
+                        nodes: this.parsedData.topology.map(n => ({
+                            hostname: n.hostname,
+                            x_offset: n.x,
+                            slot: n.rank
+                        }))
+                    }]
+                }]
+            };
+        }
+    },
+
     initDashboard: function() {
         this.pausePlayback();
         VisualiserCore.clearTopology();
@@ -64,6 +111,8 @@ const OfflineProvider = {
         const slider = document.getElementById("timeSlider");
         if (slider) { slider.step = "any"; slider.min = this.minTime; slider.max = this.maxTime; slider.disabled = false; }
         if (document.getElementById("btn-play")) document.getElementById("btn-play").disabled = false;
+
+	this.ensureValidTopology();
 
         // Hand the blueprint off to the core
         VisualiserCore.buildTopology(this.parsedData.hardware_blueprint, this.parsedData.topology, this.parsedData.metadata || this.parsedData.info);
