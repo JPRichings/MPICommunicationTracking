@@ -51,135 +51,233 @@ const OfflineProvider = {
             console.error(error);
         }
     }, 
-   
+    
     ensureValidTopology: function() {
-        const metadata = this.parsedData.metadata || this.parsedData.info || {};
-        const totalRanks = metadata.total_ranks || 0;
+	const metadata = this.parsedData.metadata || this.parsedData.info || {};
+	const totalRanks = Number(metadata.total_ranks || this.parsedData.topology?.length || 0);
 
-        // If topology is completely missing, create a realistic fallback
+	const isFiniteNum = (v) => Number.isFinite(v);
+	const hasCoords = (r) => isFiniteNum(r.x) && isFiniteNum(r.y) && isFiniteNum(r.z);
+
+	if (!Array.isArray(this.parsedData.topology)) {
+            this.parsedData.topology = [];
+	}
+
+	// If topology is completely missing, create a realistic fallback
 	// This topology isn't the system map that can be provided, this is the 
 	// information for the individual processes that should be collected at runtime.
 	// Really we should fix this in the parser rather than faking it here.
 	// TODO: Move to the parser.
-        if (!this.parsedData.topology || this.parsedData.topology.length === 0) {
-            this.parsedData.topology = [];
+	if (this.parsedData.topology.length === 0) {
             for (let i = 0; i < totalRanks; i++) {
-                this.parsedData.topology.push({ 
-                    rank: i, 
+		this.parsedData.topology.push({
+                    rank: i,
                     hostname: `node-${Math.floor(i / 128)}`,
                     chip: Math.floor((i % 128) / 64),
                     core: i % 64
-                });
+		});
             }
-        }
+	}
 
-        // Build the visual Blueprint
-        if (!this.parsedData.hardware_blueprint) {
-            const hostMap = new Map();
+	// Normalise rank records and group by host/chip.
+	const hostMap = new Map();
 
-            // Group all ranks by their actual Hostname, then by Chip
-            this.parsedData.topology.forEach(rankObj => {
-                let host = rankObj.hostname;
-                // Clean up any generic/missing hostnames safely
-                if (!host || host.startsWith("rank-")) {
-                    host = `node-${Math.floor(rankObj.rank / 128)}`;
-                    rankObj.hostname = host; 
-                }
+	this.parsedData.topology.forEach((rankObj, idx) => {
+            if (!isFiniteNum(rankObj.rank)) rankObj.rank = idx;
+            if (!isFiniteNum(rankObj.core)) rankObj.core = rankObj.rank % 64;
+            if (!isFiniteNum(rankObj.chip)) rankObj.chip = Math.floor((rankObj.rank % 128) / 64);
 
-                if (!hostMap.has(host)) {
-                    hostMap.set(host, { hostName: host, chips: new Map() });
-                }
-                
-                // Extract chip ID safely
-                let chipId = (rankObj.chip !== undefined && rankObj.chip !== null && rankObj.chip >= 0) ? rankObj.chip : 0;
-                
-                const hostNode = hostMap.get(host);
-                if (!hostNode.chips.has(chipId)) {
-                    hostNode.chips.set(chipId, []);
-                }
-                hostNode.chips.get(chipId).push(rankObj);
+            let host = (typeof rankObj.hostname === "string") ? rankObj.hostname.trim() : "";
+            if (!host) {
+		host = `node-${Math.floor(rankObj.rank / 128)}`;
+		rankObj.hostname = host;
+            }
+
+            if (!hostMap.has(host)) {
+		hostMap.set(host, {
+                    hostName: host,
+                    ranks: [],
+                    chips: new Map()
+		});
+            }
+
+            const hostEntry = hostMap.get(host);
+            hostEntry.ranks.push(rankObj);
+
+            if (!hostEntry.chips.has(rankObj.chip)) {
+		hostEntry.chips.set(rankObj.chip, []);
+            }
+            hostEntry.chips.get(rankObj.chip).push(rankObj);
+	});
+
+	const hosts = Array.from(hostMap.values()).sort((a, b) =>
+							a.hostName.localeCompare(b.hostName, undefined, { numeric: true, sensitivity: "base" })
+						       );
+
+	// Keep parser-provided coordinates if they already look valid.
+	const coordsAlreadyUsable =
+            this.parsedData.topology.length > 0 &&
+            this.parsedData.topology.every(hasCoords) &&
+            hosts.every(host => {
+		if (host.ranks.length <= 1) return true;
+		const uniquePositions = new Set(host.ranks.map(r => `${r.x}|${r.y}|${r.z}`));
+		return uniquePositions.size > 1;
             });
 
-            const uniqueHosts = Array.from(hostMap.values());
-            const numHosts = uniqueHosts.length;
-            const hostCols = Math.ceil(Math.sqrt(numHosts > 0 ? numHosts : 1));
-            
-            const hostSpacing = 80;  // Spacing between physical host nodes
-            const chipSpacing = 30;  // Spacing between sockets/chips inside a host
-            const coreSpacing = 3.0; // Spacing between individual cores
-            const coresPerRow = 8;   // Organizes cores into an 8-wide matrix
+	// Only synthesize coordinates if they are missing or collapsed.
+	const syntheticHostCenters = new Map();
 
-            const blueprintNodes = [];
+	if (!coordsAlreadyUsable) {
+            const coresPerRow = 8;
 
-            // Lay out the physical host machines
-            uniqueHosts.forEach((hostObj, hostIndex) => {
-                const hostRow = Math.floor(hostIndex / hostCols);
-                const hostCol = hostIndex % hostCols;
-                
-                const hostX = hostCol * hostSpacing;
-                const hostZ = hostRow * hostSpacing;
+            const coreSpacing = 15;
+            const chipSpacing = 140;
+            const hostPadding = 80;
 
-                // Create the physical machine in the blueprint (The Transparent Box)
-                blueprintNodes.push({
-                    hostname: hostObj.hostName, // Must match rankObj.hostname exactly
-                    slot: hostIndex,
-                    x_offset: hostX,
-                    y_offset: 0,
-                    z_offset: hostZ
-                });
+            const layouts = hosts.map((hostObj) => {
+		const chips = Array.from(hostObj.chips.entries()).sort((a, b) => a[0] - b[0]);
 
-                const chips = Array.from(hostObj.chips.entries()).sort((a, b) => a[0] - b[0]);
-                const numChips = chips.length;
-                const chipCols = Math.ceil(Math.sqrt(numChips > 0 ? numChips : 1));
+		const chipCols = Math.ceil(Math.sqrt(chips.length || 1));
+		const chipRows = Math.ceil((chips.length || 1) / chipCols);
 
-                // Lay out the chips inside the host
-                chips.forEach(([chipId, ranks], chipIndex) => {
+		let minX = Infinity, maxX = -Infinity;
+		let minY = Infinity, maxY = -Infinity;
+		let minZ = Infinity, maxZ = -Infinity;
+
+		chips.forEach(([chipId, ranks], chipIndex) => {
                     const chipRow = Math.floor(chipIndex / chipCols);
                     const chipCol = chipIndex % chipCols;
-                    
-                    const chipLocalX = (chipCol - (chipCols - 1) / 2.0) * chipSpacing;
-                    const chipLocalZ = (chipRow - (Math.ceil(numChips / chipCols) - 1) / 2.0) * chipSpacing;
 
-                    // Sort ranks by core ID
+                    const chipLocalX = (chipCol - (chipCols - 1) / 2) * chipSpacing;
+                    const chipLocalZ = (chipRow - (chipRows - 1) / 2) * chipSpacing;
+
                     ranks.sort((a, b) => {
-                        const coreA = (a.core !== undefined && a.core !== null) ? a.core : a.rank;
-                        const coreB = (b.core !== undefined && b.core !== null) ? b.core : b.rank;
-                        return coreA - coreB;
+			const coreA = isFiniteNum(a.core) ? a.core : a.rank;
+			const coreB = isFiniteNum(b.core) ? b.core : b.rank;
+			return coreA - coreB;
                     });
 
-                    // Assign absolute spatial coordinates to the individual cores (Solid Cubes)
                     ranks.forEach((rankObj, coreIdx) => {
-                        const coreRow = Math.floor(coreIdx / coresPerRow);
-                        const coreCol = coreIdx % coresPerRow;
+			const coreRow = Math.floor(coreIdx / coresPerRow);
+			const coreCol = coreIdx % coresPerRow;
 
-                        const coreLocalX = (coreCol - (coresPerRow - 1) / 2.0) * coreSpacing;
-                        const coreLocalY = coreRow * coreSpacing; // Stack vertically
+			const localX = chipLocalX + (coreCol - (coresPerRow - 1) / 2) * coreSpacing;
+			const localY = coreRow * coreSpacing;
+			const localZ = chipLocalZ;
 
-                        const localX = chipLocalX + coreLocalX;
-                        const localY = coreLocalY; 
-                        const localZ = chipLocalZ;
+			rankObj.__layoutX = localX;
+			rankObj.__layoutY = localY;
+			rankObj.__layoutZ = localZ;
 
-                        rankObj.x = hostX + localX;
-                        rankObj.y = localY;
-                        rankObj.z = hostZ + localZ;
+			minX = Math.min(minX, localX);
+			maxX = Math.max(maxX, localX);
+			minY = Math.min(minY, localY);
+			maxY = Math.max(maxY, localY);
+			minZ = Math.min(minZ, localZ);
+			maxZ = Math.max(maxZ, localZ);
                     });
-                });
+		});
+
+		if (!isFiniteNum(minX)) {
+                    minX = maxX = minY = maxY = minZ = maxZ = 0;
+		}
+
+		return { hostObj, minX, maxX, minY, maxY, minZ, maxZ };
             });
 
-            // Hand the properly structured hierarchy to the visualizer
-            this.parsedData.hardware_blueprint = {
-                metadata: { system_name: "Hardware-Mapped Topology" },
-                cabinets: [{
-                    id: "Auto-Cabinet",
-                    x: 0, y: 0, z: 0,
-                    racks: [{
-                        id: "Auto-Rack",
-                        x_offset: 0, z_offset: 0,
-                        nodes: blueprintNodes // The physical machines
-                    }]
-                }]
-            };
-        }
+            const hostCols = Math.ceil(Math.sqrt(layouts.length || 1));
+            const maxHostWidth = Math.max(1, ...layouts.map(l => l.maxX - l.minX));
+            const maxHostDepth = Math.max(1, ...layouts.map(l => l.maxZ - l.minZ));
+
+            const hostStrideX = maxHostWidth + hostPadding;
+            const hostStrideZ = maxHostDepth + hostPadding;
+
+            layouts.forEach((layout, hostIndex) => {
+		const hostRow = Math.floor(hostIndex / hostCols);
+		const hostCol = hostIndex % hostCols;
+
+		const hostCenterX = hostCol * hostStrideX;
+		const hostCenterZ = hostRow * hostStrideZ;
+
+		const localCenterX = (layout.minX + layout.maxX) / 2;
+		const localCenterZ = (layout.minZ + layout.maxZ) / 2;
+
+		layout.hostObj.ranks.forEach((rankObj) => {
+                    rankObj.x = rankObj.__layoutX + (hostCenterX - localCenterX);
+                    rankObj.y = rankObj.__layoutY;
+                    rankObj.z = rankObj.__layoutZ + (hostCenterZ - localCenterZ);
+
+                    delete rankObj.__layoutX;
+                    delete rankObj.__layoutY;
+                    delete rankObj.__layoutZ;
+		});
+
+		syntheticHostCenters.set(layout.hostObj.hostName, {
+                    x: hostCenterX,
+                    y: 0,
+                    z: hostCenterZ
+		});
+            });
+	}
+
+	// Build a hardware blueprint only if one is missing/empty.
+	const needsBlueprint =
+            !this.parsedData.hardware_blueprint ||
+            !Array.isArray(this.parsedData.hardware_blueprint.cabinets) ||
+            this.parsedData.hardware_blueprint.cabinets.length === 0;
+
+	if (!needsBlueprint) return;
+
+	const blueprintNodes = [];
+
+	if (coordsAlreadyUsable) {
+            // Build host boxes centered around the existing rank coordinates.
+            hosts.forEach((hostObj, hostIndex) => {
+		const xs = hostObj.ranks.map(r => r.x);
+		const zs = hostObj.ranks.map(r => r.z);
+
+		blueprintNodes.push({
+                    id: hostObj.hostName,
+                    hostname: hostObj.hostName,
+                    slot: hostIndex,
+                    x_offset: (Math.min(...xs) + Math.max(...xs)) / 2,
+                    y_offset: 0,
+                    z_offset: (Math.min(...zs) + Math.max(...zs)) / 2
+		});
+            });
+	} else {
+            // Use the synthetic host centers we just generated.
+            hosts.forEach((hostObj, hostIndex) => {
+		const center = syntheticHostCenters.get(hostObj.hostName) || { x: 0, y: 0, z: 0 };
+
+		blueprintNodes.push({
+                    id: hostObj.hostName,
+                    hostname: hostObj.hostName,
+                    slot: hostIndex,
+                    x_offset: center.x,
+                    y_offset: center.y,
+                    z_offset: center.z
+		});
+            });
+	}
+
+	this.parsedData.hardware_blueprint = {
+            metadata: {
+		system_name: metadata.system_name || "Hardware-Mapped Topology"
+            },
+            cabinets: [{
+		id: "Auto-Cabinet",
+		x: 0,
+		y: 0,
+		z: 0,
+		racks: [{
+                    id: "Auto-Rack",
+                    x_offset: 0,
+                    z_offset: 0,
+                    nodes: blueprintNodes
+		}]
+            }]
+	};
     },
 
     initDashboard: function() {
@@ -287,9 +385,9 @@ const OfflineProvider = {
         
         await this.ensureChunkLoadedForTime(this.currentTime);
         const activeEvents = this.getActiveEventsForWindow();
-    
+	
         VisualiserCore.clearGlow();
-      
+	
         VisualiserCore.renderFrame(activeEvents);
         VisualiserCore.updateDynamicSpectrogram(activeEvents, this.parsedData.statistics);
     },
