@@ -296,9 +296,31 @@ window.VisualiserCore = {
             fillMesh.userData = { hostname: host, isNode: true };
             nodeGroup.add(fillMesh);
 
-            const numChips = nData.cpus || 1, numCores = nData.coresPerCpu || 1;
-            const ranks = nData.ranks.sort((a, b) => a.id - b.id);
-            const activeCoreCount = ranks.length, idleCoreCount = (numChips * numCores) - activeCoreCount;
+
+	    const numChips = Math.max(1, nData.cpus || 1);
+	    const numCores = Math.max(1, nData.coresPerCpu || 1);
+
+	    const ranks = nData.ranks.slice().sort((a, b) => {
+		const aChip = Number.isFinite(a.chip) ? a.chip : 0;
+		const bChip = Number.isFinite(b.chip) ? b.chip : 0;
+		if (aChip !== bChip) return aChip - bChip;
+
+		const aCore = Number.isFinite(a.core) ? a.core : 0;
+		const bCore = Number.isFinite(b.core) ? b.core : 0;
+		if (aCore !== bCore) return aCore - bCore;
+
+		return a.id - b.id;
+	    });
+
+	    const rankLookup = new Map();
+	    ranks.forEach(r => {
+		const chip = Number.isFinite(r.chip) ? r.chip : 0;
+		const core = Number.isFinite(r.core) ? r.core : 0;
+		rankLookup.set(`${chip}:${core}`, r);
+	    });
+
+	    const activeCoreCount = ranks.length;
+	    const idleCoreCount = Math.max(0, (numChips * numCores) - activeCoreCount);
 
             const chipCols = Math.ceil(Math.sqrt(numChips)), chipRows = Math.ceil(numChips / chipCols);
             const chipSpaceX = (boxW - 0.5) / chipCols, chipSpaceY = (boxH - 0.5) / chipRows;
@@ -341,18 +363,32 @@ window.VisualiserCore = {
                 const startY = chipOffsetY + ((coreRows * coreSpacing) / 2) - (coreSpacing / 2); 
 
                 for (let i = 0; i < numCores; i++) {
-                    const activeRank = ranks[(c * numCores) + i];
+		    const activeRank = rankLookup.get(`${c}:${i}`);
                     dummy.position.set(startX + ((i % coreCols) * coreSpacing), startY - (Math.floor(i / coreCols) * coreSpacing), chipOffsetZ + 0.15);
                     dummy.updateMatrix();
 
-                    if (activeRank && instActiveCores) {
-                        instActiveCores.setMatrixAt(activeIdx, dummy.matrix);
-                        activeRankData[activeIdx] = { rank: activeRank.id, host: host, chip: c, core: i, isCore: true, localPos: dummy.position.clone() };
-                        this.rankMap.set(activeRank.id, { mesh: instActiveCores, instanceId: activeIdx, nodeGroup: nodeGroup, localPos: dummy.position.clone(), depth: coreSize }); 
-                        activeIdx++;
-                    } else if (instIdleCores) {
-                        instIdleCores.setMatrixAt(idleIdx++, dummy.matrix);
-                    }
+		    if (activeRank && instActiveCores) {
+			instActiveCores.setMatrixAt(activeIdx, dummy.matrix);
+			activeRankData[activeIdx] = {
+			    rank: activeRank.id,
+			    host: host,
+			    chip: Number.isFinite(activeRank.chip) ? activeRank.chip : c,
+			    core: Number.isFinite(activeRank.core) ? activeRank.core : i,
+			    isCore: true,
+			    localPos: dummy.position.clone()
+			};
+			this.rankMap.set(activeRank.id, {
+			    mesh: instActiveCores,
+			    instanceId: activeIdx,
+			    nodeGroup: nodeGroup,
+			    localPos: dummy.position.clone(),
+			    depth: coreSize
+			});
+			activeIdx++;
+		    } else if (instIdleCores) {
+			instIdleCores.setMatrixAt(idleIdx++, dummy.matrix);
+		    }
+
                 }
             }
         });
@@ -401,7 +437,7 @@ window.VisualiserCore = {
 
             let connectionKey = (cat.type === "collective" && sData && rData) 
                 ? `coll-${sData.nodeGroup.uuid}-${rData.nodeGroup.uuid}-${callType}`
-                : `${event.sender}-${event.receiver}-${callType}`;
+            : `${event.sender}-${event.receiver}-${callType}`;
 
             if (!aggregatedConnections.has(connectionKey)) {
                 aggregatedConnections.set(connectionKey, { sender: event.sender, receiver: event.receiver, call: callType, count: 1, sData: sData, rData: rData });
@@ -602,7 +638,7 @@ window.VisualiserCore = {
         if (data) {
             this.tooltipEl.innerHTML = data.isCore 
                 ? `<strong style="color:#58a6ff;font-size:1rem;">Rank ${data.rank}</strong><hr style="border:0;border-top:1px solid #30363d;margin:6px 0;"><span style="color:#8b949e;">Host:</span> ${data.host}<br/><span style="color:#8b949e;">Chip:</span> ${data.chip} | <span style="color:#8b949e;">Core:</span> ${data.core}`
-                : `<strong style="color:#8b949e;font-size:1rem;">Node Chassis</strong><hr style="border:0;border-top:1px solid #30363d;margin:6px 0;"><span style="color:#8b949e;">Host:</span> <span style="color:#c9d1d9;">${data.hostname}</span>`;
+            : `<strong style="color:#8b949e;font-size:1rem;">Node Chassis</strong><hr style="border:0;border-top:1px solid #30363d;margin:6px 0;"><span style="color:#8b949e;">Host:</span> <span style="color:#c9d1d9;">${data.hostname}</span>`;
             this.tooltipEl.style.display = 'block';
             this.tooltipEl.style.left = (event.clientX + 15) + 'px'; 
             this.tooltipEl.style.top = (event.clientY + 15) + 'px';
@@ -692,28 +728,28 @@ window.VisualiserCore = {
         if (this.isFollowEnabled) this.followOffset.copy(this.camera.position).sub(this.controls.target);
     },
     updateFollowCamera: function() {
-    if (!this.isFollowEnabled || !this.selectedObject) return;
+	if (!this.isFollowEnabled || !this.selectedObject) return;
 
-    const targetPos = new THREE.Vector3();
+	const targetPos = new THREE.Vector3();
 
-    if (this.selectedObject.userData?.isCore && this.selectedObject.userData?.rank !== undefined) {
-        const rankId = this.selectedObject.userData.rank;
-        const rankState = this.rankMap.get(rankId);
-        if (!rankState) return;
-        targetPos.copy(rankState.localPos).applyMatrix4(rankState.nodeGroup.matrixWorld);
-    } else if (this.selectedObject.getWorldPosition) {
-        this.selectedObject.getWorldPosition(targetPos);
-    } else if (this.selectedObject.worldPos) {
-        targetPos.copy(this.selectedObject.worldPos);
-    } else {
-        return;
-    }
+	if (this.selectedObject.userData?.isCore && this.selectedObject.userData?.rank !== undefined) {
+            const rankId = this.selectedObject.userData.rank;
+            const rankState = this.rankMap.get(rankId);
+            if (!rankState) return;
+            targetPos.copy(rankState.localPos).applyMatrix4(rankState.nodeGroup.matrixWorld);
+	} else if (this.selectedObject.getWorldPosition) {
+            this.selectedObject.getWorldPosition(targetPos);
+	} else if (this.selectedObject.worldPos) {
+            targetPos.copy(this.selectedObject.worldPos);
+	} else {
+            return;
+	}
 
-    this.controls.target.lerp(targetPos, 0.18);
-    this.desiredCam.copy(this.controls.target).add(this.followOffset);
-    this.camera.position.lerp(this.desiredCam, 0.18);
-    this.controls.update();
-},
+	this.controls.target.lerp(targetPos, 0.18);
+	this.desiredCam.copy(this.controls.target).add(this.followOffset);
+	this.camera.position.lerp(this.desiredCam, 0.18);
+	this.controls.update();
+    },
 
     applyLayout: function(mode) {
         this.currentLayoutMode = mode;
