@@ -554,7 +554,7 @@ window.VisualiserCore = {
 	const s = this._recordingState;
 	this.renderer.setPixelRatio(s.pixelRatio);
 	this.renderer.setSize(s.width, s.height, false);
-	this.camera.aspect = s.width / s.height;
+	this.camera.aspect = s.aspect
 	this.camera.updateProjectionMatrix();
 
 	this._recordingState = null;
@@ -568,11 +568,25 @@ window.VisualiserCore = {
             return;
 	}
 
+	const rect = canvasEl.getBoundingClientRect();
+	const displayAspect = rect.width / Math.max(1, rect.height);
+	
 	const fps = options.fps || 60;
-	const recordWidth = options.width || 1920;
-	const recordHeight = options.height || 1080;
-	const bitrate = options.bitrate || 40000000; // 40 Mbps default
-	const pixelRatio = options.pixelRatio || 1;
+	const bitrate = options.bitrate || 40000000;
+	
+	// Choose a target height, then derive width from the current canvas aspect
+	const targetHeight = options.height || 1080;
+	const targetWidth = options.width || Math.round(targetHeight * displayAspect);
+	
+	// If both width and height were supplied but don't match the display aspect,
+	// force them to match to avoid distortion.
+	let recordWidth = targetWidth;
+	let recordHeight = targetHeight;
+
+	const requestedAspect = recordWidth / Math.max(1, recordHeight);
+	if (Math.abs(requestedAspect - displayAspect) > 0.01) {
+	    recordWidth = Math.round(recordHeight * displayAspect);
+	}
 
 	this.recordedChunks = [];
 
@@ -583,15 +597,21 @@ window.VisualiserCore = {
 	this._recordingState = {
             width: currentSize.x,
             height: currentSize.y,
-            pixelRatio: this.renderer.getPixelRatio()
+            pixelRatio: this.renderer.getPixelRatio(),
+	    aspect: this.camera.aspect
 	};
-
-	// Temporarily render at export resolution
-	this.renderer.setPixelRatio(pixelRatio);
+	
+	const rect = canvasEl.getBoundingClientRect();
+	const scale = options.scale || 2;
+	
+	const recordWidth = Math.round(rect.width * scale);
+	const recordHeight = Math.round(rect.height * scale);
+	
+	this.renderer.setPixelRatio(1);
 	this.renderer.setSize(recordWidth, recordHeight, false);
-	this.camera.aspect = recordWidth / recordHeight;
+	this.camera.aspect = rect.width / rect.height;
 	this.camera.updateProjectionMatrix();
-
+	
 	const stream = canvasEl.captureStream(fps);
 	const mimeType = this.getBestRecordingMimeType();
 
