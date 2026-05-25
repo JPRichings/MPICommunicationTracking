@@ -410,85 +410,124 @@ window.VisualiserCore = {
     // FRAME RENDERER (Accepts Array of Active Events)
     // ---------------------------------------------------------
     renderFrame: function(activeEvents) {
-        this.clearLines();
-        const aggregatedConnections = new Map();
+	this.clearLines();
+	const aggregatedConnections = new Map();
 
-        activeEvents.forEach(event => {
-            const cat = MPI_CATEGORIES[event.call] || MPI_CATEGORIES[event.message_type] || DEFAULT_CATEGORY; // Support old .call and new .message_type
+	activeEvents.forEach(event => {
+            const cat = MPI_CATEGORIES[event.call] || MPI_CATEGORIES[event.message_type] || DEFAULT_CATEGORY;
             const callType = event.call || event.message_type;
             const sData = this.rankMap.get(event.sender);
             const rData = this.rankMap.get(event.receiver);
+            const bytes = Number.isFinite(event.bytes) ? event.bytes : 0;
 
             if (cat.type !== "state") {
-                const color = new THREE.Color(cat.color);
-                if (sData) {
-                    this.activelyGlowingRanks.set(event.sender, { mesh: sData.mesh, instanceId: sData.instanceId, color: color, intensity: 1.0 });
+		const color = new THREE.Color(cat.color);
+		if (sData) {
+                    this.activelyGlowingRanks.set(event.sender, {
+			mesh: sData.mesh,
+			instanceId: sData.instanceId,
+			color: color,
+			intensity: 1.0
+                    });
                     sData.mesh.setColorAt(sData.instanceId, color);
                     sData.mesh.instanceColor.needsUpdate = true;
-                }
-                if (rData) {
-                    this.activelyGlowingRanks.set(event.receiver, { mesh: rData.mesh, instanceId: rData.instanceId, color: color, intensity: 1.0 });
+		}
+		if (rData) {
+                    this.activelyGlowingRanks.set(event.receiver, {
+			mesh: rData.mesh,
+			instanceId: rData.instanceId,
+			color: color,
+			intensity: 1.0
+                    });
                     rData.mesh.setColorAt(rData.instanceId, color);
                     rData.mesh.instanceColor.needsUpdate = true;
-                }
+		}
             }
 
             if (event.sender === event.receiver) return;
 
-            let connectionKey = (cat.type === "collective" && sData && rData) 
-                ? `coll-${sData.nodeGroup.uuid}-${rData.nodeGroup.uuid}-${callType}`
+            let connectionKey = (cat.type === "collective" && sData && rData)
+		? `coll-${sData.nodeGroup.uuid}-${rData.nodeGroup.uuid}-${callType}`
             : `${event.sender}-${event.receiver}-${callType}`;
 
             if (!aggregatedConnections.has(connectionKey)) {
-                aggregatedConnections.set(connectionKey, { sender: event.sender, receiver: event.receiver, call: callType, count: 1, sData: sData, rData: rData });
+		aggregatedConnections.set(connectionKey, {
+                    sender: event.sender,
+                    receiver: event.receiver,
+                    call: callType,
+                    count: 1,
+                    totalBytes: bytes,
+                    sData: sData,
+                    rData: rData
+		});
             } else {
-                aggregatedConnections.get(connectionKey).count++;
+		const conn = aggregatedConnections.get(connectionKey);
+		conn.count++;
+		conn.totalBytes += bytes;
             }
-        });
+	});
 
-        aggregatedConnections.forEach(conn => {
-            const { sender, receiver, call, count, sData, rData } = conn;
+	aggregatedConnections.forEach(conn => {
+            const { sender, receiver, call, count, totalBytes, sData, rData } = conn;
             const cat = MPI_CATEGORIES[call] || DEFAULT_CATEGORY;
 
             if (sData && rData) {
-                if (sData.nodeGroup === rData.nodeGroup) {
+		if (sData.nodeGroup === rData.nodeGroup) {
                     const startWorld = sData.localPos.clone().applyMatrix4(sData.nodeGroup.matrixWorld);
                     const endWorld = rData.localPos.clone().applyMatrix4(rData.nodeGroup.matrixWorld);
-                    startWorld.z += (sData.depth / 2) + 0.5; endWorld.z += (rData.depth / 2) + 0.5;
-                    this.drawIntraNodeLine(startWorld, endWorld, call, count);
-                } else {
-                    const startWorld = (cat.type === "collective") ? sData.nodeGroup.position.clone() : sData.localPos.clone().applyMatrix4(sData.nodeGroup.matrixWorld);
-                    const endWorld = (cat.type === "collective") ? rData.nodeGroup.position.clone() : rData.localPos.clone().applyMatrix4(rData.nodeGroup.matrixWorld);
+                    startWorld.z += (sData.depth / 2) + 0.5;
+                    endWorld.z += (rData.depth / 2) + 0.5;
+                    this.drawIntraNodeLine(startWorld, endWorld, call, count, totalBytes);
+		} else {
+                    const startWorld = (cat.type === "collective")
+			? sData.nodeGroup.position.clone()
+			: sData.localPos.clone().applyMatrix4(sData.nodeGroup.matrixWorld);
+
+                    const endWorld = (cat.type === "collective")
+			? rData.nodeGroup.position.clone()
+			: rData.localPos.clone().applyMatrix4(rData.nodeGroup.matrixWorld);
+
                     startWorld.z += (cat.type === "collective") ? 5.5 : (sData.depth / 2) + 0.5;
                     endWorld.z += (cat.type === "collective") ? 5.5 : (rData.depth / 2) + 0.5;
-                    this.drawInterNodeLine(startWorld, endWorld, call, sender, receiver, count);
-                }
+
+                    this.drawInterNodeLine(startWorld, endWorld, call, sender, receiver, count, totalBytes);
+		}
             }
-        });
+	});
     },
 
-    drawIntraNodeLine: function(startPos, endPos, callName, msgCount) {
+    drawIntraNodeLine: function(startPos, endPos, callName, msgCount, totalBytes) {
+	const style = this.computeConnectionStyle(callName, msgCount, totalBytes, true);
+
 	const midPoint = startPos.clone().lerp(endPos, 0.5);
 	midPoint.z += Math.max(startPos.distanceTo(endPos) * 0.4, 1.0);
 
-	const thick = 1 + Math.log10(msgCount);
-	const tubeRadius = 0.04 * thick;
-
 	const curve = new THREE.QuadraticBezierCurve3(startPos, midPoint, endPos);
 	const tube = new THREE.Mesh(
-            new THREE.TubeGeometry(curve, 10, tubeRadius, 4, false),
-            this.sharedMaterials[callName + "_tube"] || this.sharedMaterials["default_tube"]
+            new THREE.TubeGeometry(curve, 10, style.tubeRadius, 4, false),
+            this.makeConnectionMaterial(style)
 	);
+
+	tube.userData = {
+            isConnection: true,
+            callName,
+            count: msgCount,
+            totalBytes: totalBytes,
+            avgBytes: style.avgBytes
+	};
 
 	this.scene.add(tube);
 	this.activeLines.push(tube);
 
-	this.createJunction(startPos, callName, thick);
-	this.createArrow(endPos, curve.getTangent(1.0).normalize(), callName, tubeRadius);
+	this.createJunction(startPos, style);
+	this.createArrow(endPos, curve.getTangent(1.0).normalize(), style);
     },
 
-    drawInterNodeLine: function(startPos, endPos, callName, sender, receiver, msgCount) {
+
+    drawInterNodeLine: function(startPos, endPos, callName, sender, receiver, msgCount, totalBytes) {
 	const cat = MPI_CATEGORIES[callName] || DEFAULT_CATEGORY;
+	const style = this.computeConnectionStyle(callName, msgCount, totalBytes, false);
+
 	const midPoint = startPos.clone().lerp(endPos, 0.5);
 	const bow = Math.max(startPos.distanceTo(endPos) * 0.3, 8.0);
 	const lane = (sender > receiver) ? 3.0 : -3.0;
@@ -503,22 +542,26 @@ window.VisualiserCore = {
             midPoint.y -= lane;
 	}
 
-	const thick = 1 + Math.log10(msgCount);
-	const tubeRadius = 0.12 * thick;
-
 	const curve = new THREE.QuadraticBezierCurve3(startPos, midPoint, endPos);
 	const tube = new THREE.Mesh(
-            new THREE.TubeGeometry(curve, 12, tubeRadius, 4, false),
-            this.sharedMaterials[callName + "_tube"] || this.sharedMaterials["default_tube"]
+            new THREE.TubeGeometry(curve, 12, style.tubeRadius, 4, false),
+            this.makeConnectionMaterial(style)
 	);
+
+	tube.userData = {
+            isConnection: true,
+            callName,
+            count: msgCount,
+            totalBytes: totalBytes,
+            avgBytes: style.avgBytes
+	};
 
 	this.scene.add(tube);
 	this.activeLines.push(tube);
 
-	this.createJunction(startPos, callName, thick);
-	this.createArrow(endPos, curve.getTangent(1.0).normalize(), callName, tubeRadius);
+	this.createJunction(startPos, style);
+	this.createArrow(endPos, curve.getTangent(1.0).normalize(), style);
     },
-
 
     createJunction: function(pos, callName, scaleOrRadius) {
 	const mesh = new THREE.Mesh(
@@ -567,12 +610,33 @@ window.VisualiserCore = {
 	this.junctionPoints.push(mesh);
     },
 
+    createJunction: function(pos, style) {
+	const mesh = new THREE.Mesh(this.sharedSphereGeo, this.makeConnectionMaterial(style));
+	mesh.position.copy(pos);
+	mesh.scale.setScalar(style.junctionScale);
+	this.scene.add(mesh);
+	this.junctionPoints.push(mesh);
+    },
 
     clearLines: function() {
-        this.activeLines.forEach(l => { if (l.geometry) l.geometry.dispose(); this.scene.remove(l); });
-        this.activeLines = [];
-        this.junctionPoints.forEach(pt => this.scene.remove(pt));
-        this.junctionPoints = [];
+	this.activeLines.forEach(l => {
+            if (l.geometry) l.geometry.dispose();
+            if (l.material) {
+		if (Array.isArray(l.material)) l.material.forEach(m => m.dispose());
+		else l.material.dispose();
+            }
+            this.scene.remove(l);
+	});
+	this.activeLines = [];
+
+	this.junctionPoints.forEach(pt => {
+            if (pt.material) {
+		if (Array.isArray(pt.material)) pt.material.forEach(m => m.dispose());
+		else pt.material.dispose();
+            }
+            this.scene.remove(pt);
+	});
+	this.junctionPoints = [];
     },
 
     clearGlow: function() {
@@ -582,6 +646,63 @@ window.VisualiserCore = {
         });
         this.activelyGlowingRanks.clear();
     },
+
+    computeConnectionStyle: function(callName, msgCount, totalBytes, intraNode = false) {
+	const cat = MPI_CATEGORIES[callName] || DEFAULT_CATEGORY;
+
+	// Keep your current thickness logic based on aggregated count
+	const thick = 1 + Math.log10(Math.max(1, msgCount));
+
+	// Use average bytes/message as the "message size" metric
+	const avgBytes = (msgCount > 0) ? (totalBytes / msgCount) : 0;
+
+	// Normalise size roughly across 1B .. 1MB+
+	const sizeNorm = Math.min(1, Math.log10(avgBytes + 1) / 6.0);
+	const countNorm = Math.min(1, Math.log10(msgCount + 1) / 3.0);
+
+	const tubeRadius = (intraNode ? 0.04 : 0.12) * thick;
+
+	// Preserve category hue, vary saturation/lightness by size/count
+	const color = new THREE.Color(cat.color);
+	const hsl = {};
+	color.getHSL(hsl);
+
+	color.setHSL(
+            hsl.h,
+            Math.min(1.0, 0.45 + 0.45 * sizeNorm),
+            Math.min(0.82, 0.33 + 0.20 * sizeNorm + 0.14 * countNorm)
+	);
+
+	const emissive = color.clone().multiplyScalar(0.10 + 0.35 * countNorm);
+	const opacity = 0.70 + 0.20 * countNorm;
+
+	const arrowRadius = Math.max(0.16, tubeRadius * 1.8);
+	const arrowLength = Math.max(0.6, tubeRadius * (4.0 + 1.5 * sizeNorm));
+	const junctionScale = Math.max(1.0, thick * (1.0 + 0.35 * sizeNorm));
+
+	return {
+            color,
+            emissive,
+            opacity,
+            tubeRadius,
+            arrowRadius,
+            arrowLength,
+            junctionScale,
+            avgBytes,
+            totalBytes,
+            msgCount
+	};
+    },
+
+    makeConnectionMaterial: function(style) {
+	return new THREE.MeshLambertMaterial({
+            color: style.color.clone(),
+            emissive: style.emissive.clone(),
+            transparent: true,
+            opacity: style.opacity
+	});
+    },
+
 
     // ---------------------------------------------------------
     // RECORDING FUNCTIONS
