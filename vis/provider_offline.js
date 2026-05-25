@@ -59,80 +59,123 @@ const OfflineProvider = {
             this.parsedData.topology = [];
 	}
 
-	const totalRanks = Number(metadata.total_ranks || this.parsedData.topology.length || 0);
+	const topology = this.parsedData.topology;
+	const totalRanks = Number(metadata.total_ranks || topology.length || 0);
 
 	// If topology is completely missing, create a realistic fallback
 	// This topology isn't the system map that can be provided, this is the 
 	// information for the individual processes that should be collected at runtime.
 	// Really we should fix this in the parser rather than faking it here.
 	// TODO: Move to the parser.
-	if (this.parsedData.topology.length === 0) {
+        
+	if (topology.length === 0) {
             for (let i = 0; i < totalRanks; i++) {
-		this.parsedData.topology.push({
+		topology.push({
                     rank: i,
-                    hostname: `node-${Math.floor(i / 128)}`,
-                    chip: Math.floor((i % 128) / 64),
-                    core: i % 64
+                    hostname: "node-0",
+                    chip: 0,
+                    core: i
 		});
             }
 	}
 
-	const topology = this.parsedData.topology;
 	const hosts = new Map();
 
+	// --------------------------------------------------
+	// Group by hostname, then by raw chip
+	// --------------------------------------------------
 	topology.forEach((rankObj, idx) => {
-            if (!Number.isFinite(rankObj.rank)) rankObj.rank = idx;
-            if (!Number.isFinite(rankObj.chip)) rankObj.chip = Math.floor((rankObj.rank % 128) / 64);
-            if (!Number.isFinite(rankObj.core)) rankObj.core = rankObj.rank % 64;
+            if (!Number.isFinite(rankObj.rank)) {
+		rankObj.rank = idx;
+            }
 
             let host = (typeof rankObj.hostname === "string") ? rankObj.hostname.trim() : "";
-            if (!host) host = `node-${Math.floor(rankObj.rank / 128)}`;
+            if (!host) host = "node-0";
             rankObj.hostname = host;
+
+            const rawChip = Number.isFinite(rankObj.chip) ? rankObj.chip : 0;
+            const rawCore = Number.isFinite(rankObj.core) ? rankObj.core : rankObj.rank;
+
+            // Preserve original values for debugging/reference
+            rankObj.raw_chip = rawChip;
+            rankObj.raw_core = rawCore;
 
             if (!hosts.has(host)) {
 		hosts.set(host, {
                     hostName: host,
                     ranks: [],
-                    maxChip: -1,
-                    coreCountsByChip: new Map()
+                    chipGroups: new Map(),
+                    inferredCpuCount: 1,
+                    inferredCoresPerCpu: 1
 		});
             }
 
             const h = hosts.get(host);
-            const chip = Math.max(0, rankObj.chip | 0);
-            const core = Math.max(0, rankObj.core | 0);
-
             h.ranks.push(rankObj);
-            h.maxChip = Math.max(h.maxChip, chip);
 
-            const prev = h.coreCountsByChip.get(chip) || 0;
-            h.coreCountsByChip.set(chip, Math.max(prev, core + 1));
+            if (!h.chipGroups.has(rawChip)) {
+		h.chipGroups.set(rawChip, []);
+            }
+            h.chipGroups.get(rawChip).push(rankObj);
 	});
 
-	// If blueprint already exists in a format VisualiserCore supports, keep it.
-	const bp = this.parsedData.hardware_blueprint;
-	const hasFlatBlueprint =
-            bp &&
-            typeof bp === "object" &&
-            !Array.isArray(bp) &&
-            Object.keys(bp).some(k => k !== "metadata" && k !== "cabinets");
-
-	const hasCabinetBladeBlueprint =
-            bp &&
-            Array.isArray(bp.cabinets) &&
-            bp.cabinets.some(c =>
-			     Array.isArray(c.racks) &&
-			     c.racks.some(r => Array.isArray(r.blades))
-			    );
-
-	if (hasFlatBlueprint || hasCabinetBladeBlueprint) {
-            return;
-	}
-
-	// Build a flat blueprint that YOUR VisualiserCore actually understands
 	const hostList = Array.from(hosts.values()).sort((a, b) =>
 							 a.hostName.localeCompare(b.hostName, undefined, { numeric: true, sensitivity: "base" })
 							);
+
+	// --------------------------------------------------
+	// For each host, infer a dense visual topology
+	//
+	//    - visual chip IDs become 0..N-1
+	//    - visual core IDs become 0..K-1 within each chip
+	//
+	// This avoids sparse/global raw IDs turning into
+	// 128-core processors, 9 chips, etc.
+	// --------------------------------------------------
+	hostList.forEach((hostObj) => {
+            const chipEntries = Array.from(hostObj.chipGroups.entries()).sort((a, b) => {
+		const aChip = Number.isFinite(a[0]) ? a[0] : 0;
+		const bChip = Number.isFinite(b[0]) ? b[0] : 0;
+		return aChip - bChip;
+            });
+
+            let maxRanksOnAnyChip = 0;
+
+            chipEntries.forEach(([rawChip, chipRanks], visualChipIdx) => {
+		// Sort deterministically by raw core, then rank
+		chipRanks.sort((a, b) => {
+                    const ac = Number.isFinite(a.raw_core) ? a.raw_core : a.rank;
+                    const bc = Number.isFinite(b.raw_core) ? b.raw_core : b.rank;
+                    if (ac !== bc) return ac - bc;
+                    return a.rank - b.rank;
+		});
+
+		// Dense remap within this chip.
+		// Even if raw cores are global/sparse/non-contiguous, the display stays sensible.
+		chipRanks.forEach((rankObj, visualCoreIdx) => {
+                    rankObj.chip = visualChipIdx;
+                    rankObj.core = visualCoreIdx;
+		});
+
+		if (chipRanks.length > maxRanksOnAnyChip) {
+                    maxRanksOnAnyChip = chipRanks.length;
+		}
+            });
+
+            hostObj.inferredCpuCount = Math.max(1, chipEntries.length);
+            hostObj.inferredCoresPerCpu = Math.max(1, maxRanksOnAnyChip);
+	});
+
+	// --------------------------------------------------
+	// Build/update a flat blueprint that
+	// VisualiserCore.buildTopology() understands
+	// --------------------------------------------------
+	const existingBp = this.parsedData.hardware_blueprint;
+	const existingFlatBlueprint =
+            existingBp &&
+            typeof existingBp === "object" &&
+            !Array.isArray(existingBp) &&
+            !Array.isArray(existingBp.cabinets);
 
 	const cols = Math.ceil(Math.sqrt(hostList.length || 1));
 	const rows = Math.ceil((hostList.length || 1) / cols);
@@ -140,7 +183,7 @@ const OfflineProvider = {
 
 	const flatBlueprint = {
             metadata: {
-		system_name: metadata.system_name || "Hardware-Mapped Topology"
+		system_name: metadata.system_name || "Inferred Process Topology"
             }
 	};
 
@@ -148,25 +191,37 @@ const OfflineProvider = {
             const col = index % cols;
             const row = Math.floor(index / cols);
 
-            const x = (col - (cols - 1) / 2) * hostSpacing;
-            const z = (row - (rows - 1) / 2) * hostSpacing;
-
-            const cpus = Math.max(1, hostObj.maxChip + 1);
-            const coresPerCpu = Math.max(
-		1,
-		    ...Array.from(hostObj.coreCountsByChip.values())
-            );
+            const existingHostEntry = existingFlatBlueprint ? existingBp[hostObj.hostName] : null;
 
             flatBlueprint[hostObj.hostName] = {
-		x: x,
-		y: 0,
-		z: z,
-		cpus: cpus,
-		cores_per_cpu: coresPerCpu
+		x: Number.isFinite(existingHostEntry?.x)
+                    ? existingHostEntry.x
+                    : (col - (cols - 1) / 2) * hostSpacing,
+		y: Number.isFinite(existingHostEntry?.y)
+                    ? existingHostEntry.y
+                    : 0,
+		z: Number.isFinite(existingHostEntry?.z)
+                    ? existingHostEntry.z
+                    : (row - (rows - 1) / 2) * hostSpacing,
+		cpus: hostObj.inferredCpuCount,
+		cores_per_cpu: hostObj.inferredCoresPerCpu
             };
 	});
 
 	this.parsedData.hardware_blueprint = flatBlueprint;
+
+	console.log("Inferred topology:");
+	hostList.forEach(h => {
+            console.log(
+		h.hostName,
+		`chips=${h.inferredCpuCount}`,
+		`max-ranks-per-chip=${h.inferredCoresPerCpu}`,
+		Array.from(h.chipGroups.entries()).map(([chip, ranks]) => ({
+                    rawChip: chip,
+                    ranks: ranks.length
+		}))
+            );
+	});
     },
 
     initDashboard: function() {
