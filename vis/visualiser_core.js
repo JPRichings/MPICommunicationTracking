@@ -519,11 +519,26 @@ window.VisualiserCore = {
 	this.createArrow(endPos, curve.getTangent(1.0).normalize(), callName, tubeRadius);
     },
 
-    createJunction: function(pos, callName, scale) {
-        const mesh = new THREE.Mesh(this.sharedSphereGeo, this.sharedMaterials[callName + "_junction"] || this.sharedMaterials["default_junction"]);
-        mesh.position.copy(pos); mesh.scale.set(scale, scale, scale);
-        this.scene.add(mesh); this.junctionPoints.push(mesh);
+
+    createJunction: function(pos, callName, scaleOrRadius) {
+	const mesh = new THREE.Mesh(
+            this.sharedSphereGeo,
+            this.sharedMaterials[callName + "_junction"] || this.sharedMaterials["default_junction"]
+	);
+
+	const radius = (scaleOrRadius < 1.0)
+            ? Math.max(0.12, scaleOrRadius * 1.6)
+            : Math.max(0.12, 0.04 * scaleOrRadius * 1.6);
+
+	const uniformScale = radius / 0.04;
+
+	mesh.position.copy(pos);
+	mesh.scale.set(uniformScale, uniformScale, uniformScale);
+
+	this.scene.add(mesh);
+	this.junctionPoints.push(mesh);
     },
+
 
     createArrow: function(pos, dir, callName, tubeRadius) {
 	const mesh = new THREE.Mesh(
@@ -550,6 +565,14 @@ window.VisualiserCore = {
 
 	this.scene.add(mesh);
 	this.junctionPoints.push(mesh);
+    },
+
+
+    clearLines: function() {
+        this.activeLines.forEach(l => { if (l.geometry) l.geometry.dispose(); this.scene.remove(l); });
+        this.activeLines = [];
+        this.junctionPoints.forEach(pt => this.scene.remove(pt));
+        this.junctionPoints = [];
     },
 
     clearGlow: function() {
