@@ -158,6 +158,17 @@ window.VisualiserCore = {
         this.renderer.render(this.scene, this.camera);
     },
 
+    colorToCss: function(colorLike) {
+	if (typeof colorLike === "string") return colorLike;
+	if (colorLike && typeof colorLike.getHexString === "function") {
+            return `#${colorLike.getHexString()}`;
+	}
+	if (typeof colorLike === "number") {
+            return `#${colorLike.toString(16).padStart(6, "0")}`;
+	}
+	return "#8b949e";
+    },
+    
     clearTopology: function() {
         const geoms = new Set(), mats = new Set();
         const collect = (root) => {
@@ -477,7 +488,7 @@ window.VisualiserCore = {
                     const endWorld = rData.localPos.clone().applyMatrix4(rData.nodeGroup.matrixWorld);
                     startWorld.z += (sData.depth / 2) + 0.5;
                     endWorld.z += (rData.depth / 2) + 0.5;
-                    this.drawIntraNodeLine(startWorld, endWorld, call, count, totalBytes);
+		    this.drawIntraNodeLine(startWorld, endWorld, call, sender, receiver, count, totalBytes);
 		} else {
                     const startWorld = (cat.type === "collective")
 			? sData.nodeGroup.position.clone()
@@ -490,14 +501,26 @@ window.VisualiserCore = {
                     startWorld.z += (cat.type === "collective") ? 5.5 : (sData.depth / 2) + 0.5;
                     endWorld.z += (cat.type === "collective") ? 5.5 : (rData.depth / 2) + 0.5;
 
-                    this.drawInterNodeLine(startWorld, endWorld, call, sender, receiver, count, totalBytes);
+		    this.drawInterNodeLine(startWorld, endWorld, call, sender, receiver, count, totalBytes);
 		}
             }
 	});
     },
 
-    drawIntraNodeLine: function(startPos, endPos, callName, msgCount, totalBytes) {
+    drawIntraNodeLine: function(startPos, endPos, callName, sender, receiver, msgCount, totalBytes) {
 	const style = this.computeConnectionStyle(callName, msgCount, totalBytes, true);
+
+	const connUserData = {
+	    isConnection: true,
+	    callName,
+	    sender,
+	    receiver,
+	    count: msgCount,
+	    totalBytes: totalBytes,
+	    avgBytes: style.avgBytes,
+	    hoverColor: this.colorToCss(style.color),
+	    categoryColor: this.colorToCss((MPI_CATEGORIES[callName] || DEFAULT_CATEGORY).color)
+	};
 
 	const midPoint = startPos.clone().lerp(endPos, 0.5);
 	midPoint.z += Math.max(startPos.distanceTo(endPos) * 0.4, 1.0);
@@ -508,25 +531,29 @@ window.VisualiserCore = {
             this.makeConnectionMaterial(style)
 	);
 
-	tube.userData = {
-            isConnection: true,
-            callName,
-            count: msgCount,
-            totalBytes: totalBytes,
-            avgBytes: style.avgBytes
-	};
+	tube.userData = connUserData;
 
 	this.scene.add(tube);
 	this.activeLines.push(tube);
 
-	this.createJunction(startPos, style);
-	this.createArrow(endPos, curve.getTangent(1.0).normalize(), style);
+	this.createJunction(startPos, style, connUserData);
+	this.createArrow(endPos, curve.getTangent(1.0).normalize(), style, connUserData);
     },
-
-
     drawInterNodeLine: function(startPos, endPos, callName, sender, receiver, msgCount, totalBytes) {
 	const cat = MPI_CATEGORIES[callName] || DEFAULT_CATEGORY;
 	const style = this.computeConnectionStyle(callName, msgCount, totalBytes, false);
+
+	const connUserData = {
+            isConnection: true,
+            callName,
+            sender,
+            receiver,
+            count: msgCount,
+            totalBytes: totalBytes,
+            avgBytes: style.avgBytes,
+            hoverColor: this.colorToCss(style.color),
+            categoryColor: this.colorToCss((MPI_CATEGORIES[callName] || DEFAULT_CATEGORY).color)
+	};
 
 	const midPoint = startPos.clone().lerp(endPos, 0.5);
 	const bow = Math.max(startPos.distanceTo(endPos) * 0.3, 8.0);
@@ -548,72 +575,37 @@ window.VisualiserCore = {
             this.makeConnectionMaterial(style)
 	);
 
-	tube.userData = {
-            isConnection: true,
-            callName,
-            count: msgCount,
-            totalBytes: totalBytes,
-            avgBytes: style.avgBytes
-	};
+	tube.userData = connUserData;
 
 	this.scene.add(tube);
 	this.activeLines.push(tube);
 
-	this.createJunction(startPos, style);
-	this.createArrow(endPos, curve.getTangent(1.0).normalize(), style);
+	this.createJunction(startPos, style, connUserData);
+	this.createArrow(endPos, curve.getTangent(1.0).normalize(), style, connUserData);
     },
 
-    createJunction: function(pos, callName, scaleOrRadius) {
-	const mesh = new THREE.Mesh(
-            this.sharedSphereGeo,
-            this.sharedMaterials[callName + "_junction"] || this.sharedMaterials["default_junction"]
-	);
-
-	const radius = (scaleOrRadius < 1.0)
-            ? Math.max(0.12, scaleOrRadius * 1.6)
-            : Math.max(0.12, 0.04 * scaleOrRadius * 1.6);
-
-	const uniformScale = radius / 0.04;
-
-	mesh.position.copy(pos);
-	mesh.scale.set(uniformScale, uniformScale, uniformScale);
-
-	this.scene.add(mesh);
-	this.junctionPoints.push(mesh);
-    },
-
-
-    createArrow: function(pos, dir, callName, tubeRadius) {
-	const mesh = new THREE.Mesh(
-            this.sharedArrowGeo,
-            this.sharedMaterials[callName + "_junction"] || this.sharedMaterials["default_junction"]
-	);
-
-	const nDir = dir.clone().normalize();
-
-	// Make the arrow visibly larger than the tube
-	const arrowRadius = Math.max(0.16, tubeRadius * 1.8);
-	const arrowLength = Math.max(0.6, tubeRadius * 5.0);
-
-	// sharedArrowGeo was created with radius 0.08 and length 0.25
-	const radialScale = arrowRadius / 0.08;
-	const lengthScale = arrowLength / 0.25;
-
-	// Push the arrow slightly beyond the end of the tube so it doesn't get buried
-	const forwardOffset = Math.max(arrowLength * 0.45, tubeRadius * 1.5);
-
-	mesh.position.copy(pos).addScaledVector(nDir, forwardOffset);
-	mesh.lookAt(mesh.position.clone().add(nDir));
-	mesh.scale.set(radialScale, radialScale, lengthScale);
-
-	this.scene.add(mesh);
-	this.junctionPoints.push(mesh);
-    },
-
-    createJunction: function(pos, style) {
+    createJunction: function(pos, style, userData = null) {
 	const mesh = new THREE.Mesh(this.sharedSphereGeo, this.makeConnectionMaterial(style));
 	mesh.position.copy(pos);
 	mesh.scale.setScalar(style.junctionScale);
+	if (userData) mesh.userData = { ...userData };
+	this.scene.add(mesh);
+	this.junctionPoints.push(mesh);
+    },
+
+    createArrow: function(pos, dir, style, userData = null) {
+	const mesh = new THREE.Mesh(this.sharedArrowGeo, this.makeConnectionMaterial(style));
+	const nDir = dir.clone().normalize();
+
+	const radialScale = style.arrowRadius / 0.08;
+	const lengthScale = style.arrowLength / 0.25;
+
+	mesh.position.copy(pos);
+	mesh.lookAt(mesh.position.clone().add(nDir));
+	mesh.scale.set(radialScale, radialScale, lengthScale);
+
+	if (userData) mesh.userData = { ...userData };
+
 	this.scene.add(mesh);
 	this.junctionPoints.push(mesh);
     },
@@ -645,6 +637,52 @@ window.VisualiserCore = {
             state.mesh.instanceColor.needsUpdate = true;
         });
         this.activelyGlowingRanks.clear();
+    },
+
+    formatBytes: function(bytes) {
+	if (!Number.isFinite(bytes) || bytes < 0) return "0 B";
+
+	const units = ["B", "KB", "MB", "GB", "TB"];
+	let value = bytes;
+	let unitIdx = 0;
+
+	while (value >= 1024 && unitIdx < units.length - 1) {
+            value /= 1024;
+            unitIdx++;
+	}
+
+	if (unitIdx === 0) return `${Math.round(value)} ${units[unitIdx]}`;
+	if (value < 10) return `${value.toFixed(2)} ${units[unitIdx]}`;
+	if (value < 100) return `${value.toFixed(1)} ${units[unitIdx]}`;
+	return `${Math.round(value)} ${units[unitIdx]}`;
+    },
+
+    buildConnectionTooltipHTML: function(data) {
+	const accent = this.colorToCss(
+            data.hoverColor ||
+		data.categoryColor ||
+		(MPI_CATEGORIES[data.callName]?.color ?? DEFAULT_CATEGORY.color)
+	);
+
+	return `
+            <div style="display:flex;align-items:center;gap:8px;">
+            <div style="
+width:12px;
+height:12px;
+border-radius:2px;
+background:${accent};
+box-shadow:0 0 8px ${accent};
+flex:0 0 auto;
+"></div>
+            <strong style="color:${accent};font-size:1rem;">${data.callName || "MPI Connection"}</strong>
+            </div>
+            <hr style="border:0;border-top:1px solid ${accent};opacity:0.35;margin:6px 0;">
+            <span style="color:#8b949e;">From:</span> ${data.sender ?? "?"}<br/>
+            <span style="color:#8b949e;">To:</span> ${data.receiver ?? "?"}<br/>
+            <span style="color:#8b949e;">Messages:</span> ${data.count ?? 0}<br/>
+            <span style="color:#8b949e;">Total bytes:</span> ${this.formatBytes(data.totalBytes ?? 0)}<br/>
+            <span style="color:#8b949e;">Avg/message:</span> ${this.formatBytes(data.avgBytes ?? 0)}
+	`;
     },
 
     computeConnectionStyle: function(callName, msgCount, totalBytes, intraNode = false) {
@@ -886,32 +924,79 @@ window.VisualiserCore = {
     },
 
     onMouseMove: function(event) {
-        if (!this.tooltipEl) return;
-        const rect = this.renderer.domElement.getBoundingClientRect();
-        const raycaster = new THREE.Raycaster();
-        raycaster.setFromCamera({ x: ((event.clientX - rect.left) / rect.width) * 2 - 1, y: -((event.clientY - rect.top) / rect.height) * 2 + 1 }, this.camera);
-        const intersects = raycaster.intersectObjects(this.scene.children, true);
+	if (!this.tooltipEl) return;
 
-        let hoveredRank = null, hoveredNode = null;
-        for (let i = 0; i < intersects.length; i++) {
-            const obj = intersects[i].object;
-            if (obj.userData?.isInstancedCore) { hoveredRank = obj.userData.rankData[intersects[i].instanceId]; break; } 
-            else if (obj.userData?.isNode && !hoveredNode) { hoveredNode = obj.userData; }
-        }
+	const rect = this.renderer.domElement.getBoundingClientRect();
+	const raycaster = new THREE.Raycaster();
 
-        const data = hoveredRank || hoveredNode;
-        if (data) {
-            this.tooltipEl.innerHTML = data.isCore 
-                ? `<strong style="color:#58a6ff;font-size:1rem;">Rank ${data.rank}</strong><hr style="border:0;border-top:1px solid #30363d;margin:6px 0;"><span style="color:#8b949e;">Host:</span> ${data.host}<br/><span style="color:#8b949e;">Chip:</span> ${data.chip} | <span style="color:#8b949e;">Core:</span> ${data.core}`
-            : `<strong style="color:#8b949e;font-size:1rem;">Node Chassis</strong><hr style="border:0;border-top:1px solid #30363d;margin:6px 0;"><span style="color:#8b949e;">Host:</span> <span style="color:#c9d1d9;">${data.hostname}</span>`;
-            this.tooltipEl.style.display = 'block';
-            this.tooltipEl.style.left = (event.clientX + 15) + 'px'; 
-            this.tooltipEl.style.top = (event.clientY + 15) + 'px';
-            document.body.style.cursor = 'pointer';
-        } else {
-            this.tooltipEl.style.display = 'none';
-            document.body.style.cursor = 'default';
-        }
+	raycaster.setFromCamera(
+            {
+		x: ((event.clientX - rect.left) / rect.width) * 2 - 1,
+		y: -((event.clientY - rect.top) / rect.height) * 2 + 1
+            },
+            this.camera
+	);
+
+	const intersects = raycaster.intersectObjects(this.scene.children, true);
+
+	let hoveredRank = null;
+	let hoveredConnection = null;
+	let hoveredNode = null;
+
+	for (let i = 0; i < intersects.length; i++) {
+            const hit = intersects[i];
+            const obj = hit.object;
+
+            if (obj.userData?.isInstancedCore) {
+		hoveredRank = obj.userData.rankData[hit.instanceId];
+		break;
+            } else if (obj.userData?.isConnection) {
+		hoveredConnection = obj.userData;
+		break;
+            } else if (obj.userData?.isNode && !hoveredNode) {
+		hoveredNode = obj.userData;
+            }
+	}
+
+	if (hoveredRank) {
+            this.tooltipEl.innerHTML = `
+		<strong style="color:#58a6ff;font-size:1rem;">Rank ${hoveredRank.rank}</strong>
+		<hr style="border:0;border-top:1px solid #30363d;margin:6px 0;">
+		<span style="color:#8b949e;">Host:</span> ${hoveredRank.host}<br/>
+		<span style="color:#8b949e;">Chip:</span> ${hoveredRank.chip} |
+		<span style="color:#8b949e;">Core:</span> ${hoveredRank.core}
+            `;
+            this.tooltipEl.style.display = "block";
+            this.tooltipEl.style.left = (event.clientX + 15) + "px";
+            this.tooltipEl.style.top = (event.clientY + 15) + "px";
+            document.body.style.cursor = "pointer";
+            return;
+	}
+
+	if (hoveredConnection) {
+            this.tooltipEl.innerHTML = this.buildConnectionTooltipHTML(hoveredConnection);
+            this.tooltipEl.style.display = "block";
+            this.tooltipEl.style.left = (event.clientX + 15) + "px";
+            this.tooltipEl.style.top = (event.clientY + 15) + "px";
+            document.body.style.cursor = "pointer";
+            return;
+	}
+
+	if (hoveredNode) {
+            this.tooltipEl.innerHTML = `
+		<strong style="color:#8b949e;font-size:1rem;">Node Chassis</strong>
+		<hr style="border:0;border-top:1px solid #30363d;margin:6px 0;">
+		<span style="color:#8b949e;">Host:</span> <span style="color:#c9d1d9;">${hoveredNode.hostname}</span>
+		`;
+            this.tooltipEl.style.display = "block";
+            this.tooltipEl.style.left = (event.clientX + 15) + "px";
+            this.tooltipEl.style.top = (event.clientY + 15) + "px";
+            document.body.style.cursor = "pointer";
+            return;
+	}
+
+	this.tooltipEl.style.display = "none";
+	document.body.style.cursor = "default";
     },
 
     onCanvasClick: function(event) {
