@@ -601,7 +601,7 @@ window.VisualiserCore = {
 	    aspect: this.camera.aspect
 	};
 	
-	const rect = canvasEl.getBoundingClientRect();
+
 	const scale = options.scale || 2;
 	
 	const recordWidth = Math.round(rect.width * scale);
