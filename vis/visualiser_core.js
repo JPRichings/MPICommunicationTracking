@@ -468,34 +468,55 @@ window.VisualiserCore = {
     },
 
     drawIntraNodeLine: function(startPos, endPos, callName, msgCount) {
-        const midPoint = startPos.clone().lerp(endPos, 0.5);
-        midPoint.z += Math.max(startPos.distanceTo(endPos) * 0.4, 1.0); 
-        const thick = 1 + Math.log10(msgCount);
-        const curve = new THREE.QuadraticBezierCurve3(startPos, midPoint, endPos);
-        const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 10, 0.04 * thick, 4, false), this.sharedMaterials[callName + "_tube"] || this.sharedMaterials["default_tube"]);
-        this.scene.add(tube);
-        this.activeLines.push(tube);
-        this.createJunction(startPos, callName, thick);
-        this.createArrow(endPos, curve.getTangent(1.0).normalize(), callName, thick);
+	const midPoint = startPos.clone().lerp(endPos, 0.5);
+	midPoint.z += Math.max(startPos.distanceTo(endPos) * 0.4, 1.0);
+
+	const thick = 1 + Math.log10(msgCount);
+	const tubeRadius = 0.04 * thick;
+
+	const curve = new THREE.QuadraticBezierCurve3(startPos, midPoint, endPos);
+	const tube = new THREE.Mesh(
+            new THREE.TubeGeometry(curve, 10, tubeRadius, 4, false),
+            this.sharedMaterials[callName + "_tube"] || this.sharedMaterials["default_tube"]
+	);
+
+	this.scene.add(tube);
+	this.activeLines.push(tube);
+
+	this.createJunction(startPos, callName, thick);
+	this.createArrow(endPos, curve.getTangent(1.0).normalize(), callName, tubeRadius);
     },
 
     drawInterNodeLine: function(startPos, endPos, callName, sender, receiver, msgCount) {
-        const cat = MPI_CATEGORIES[callName] || DEFAULT_CATEGORY;
-        const midPoint = startPos.clone().lerp(endPos, 0.5);
-        const bow = Math.max(startPos.distanceTo(endPos) * 0.3, 8.0); 
-        const lane = (sender > receiver) ? 3.0 : -3.0;
+	const cat = MPI_CATEGORIES[callName] || DEFAULT_CATEGORY;
+	const midPoint = startPos.clone().lerp(endPos, 0.5);
+	const bow = Math.max(startPos.distanceTo(endPos) * 0.3, 8.0);
+	const lane = (sender > receiver) ? 3.0 : -3.0;
 
-        if (cat.type === "collective") { midPoint.z += bow * 1.5; } 
-        else if (cat.type === "p2p_nonblock") { midPoint.z += bow; midPoint.y += lane; } 
-        else { midPoint.z += bow; midPoint.y -= lane; }
+	if (cat.type === "collective") {
+            midPoint.z += bow * 1.5;
+	} else if (cat.type === "p2p_nonblock") {
+            midPoint.z += bow;
+            midPoint.y += lane;
+	} else {
+            midPoint.z += bow;
+            midPoint.y -= lane;
+	}
 
-        const thick = 1 + Math.log10(msgCount);
-        const curve = new THREE.QuadraticBezierCurve3(startPos, midPoint, endPos);
-        const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, 12, 0.12 * thick, 4, false), this.sharedMaterials[callName + "_tube"] || this.sharedMaterials["default_tube"]);
-        this.scene.add(tube);
-        this.activeLines.push(tube);
-        this.createJunction(startPos, callName, thick);
-        this.createArrow(endPos, curve.getTangent(1.0).normalize(), callName, thick);
+	const thick = 1 + Math.log10(msgCount);
+	const tubeRadius = 0.12 * thick;
+
+	const curve = new THREE.QuadraticBezierCurve3(startPos, midPoint, endPos);
+	const tube = new THREE.Mesh(
+            new THREE.TubeGeometry(curve, 12, tubeRadius, 4, false),
+            this.sharedMaterials[callName + "_tube"] || this.sharedMaterials["default_tube"]
+	);
+
+	this.scene.add(tube);
+	this.activeLines.push(tube);
+
+	this.createJunction(startPos, callName, thick);
+	this.createArrow(endPos, curve.getTangent(1.0).normalize(), callName, tubeRadius);
     },
 
     createJunction: function(pos, callName, scale) {
@@ -504,17 +525,31 @@ window.VisualiserCore = {
         this.scene.add(mesh); this.junctionPoints.push(mesh);
     },
 
-    createArrow: function(pos, dir, callName, scale) {
-        const mesh = new THREE.Mesh(this.sharedArrowGeo, this.sharedMaterials[callName + "_junction"] || this.sharedMaterials["default_junction"]);
-        mesh.position.copy(pos); mesh.lookAt(pos.clone().add(dir)); mesh.scale.set(scale, scale, scale);
-        this.scene.add(mesh); this.junctionPoints.push(mesh);
-    },
+    createArrow: function(pos, dir, callName, tubeRadius) {
+	const mesh = new THREE.Mesh(
+            this.sharedArrowGeo,
+            this.sharedMaterials[callName + "_junction"] || this.sharedMaterials["default_junction"]
+	);
 
-    clearLines: function() {
-        this.activeLines.forEach(l => { if (l.geometry) l.geometry.dispose(); this.scene.remove(l); });
-        this.activeLines = [];
-        this.junctionPoints.forEach(pt => this.scene.remove(pt));
-        this.junctionPoints = [];
+	const nDir = dir.clone().normalize();
+
+	// Make the arrow visibly larger than the tube
+	const arrowRadius = Math.max(0.16, tubeRadius * 1.8);
+	const arrowLength = Math.max(0.6, tubeRadius * 5.0);
+
+	// sharedArrowGeo was created with radius 0.08 and length 0.25
+	const radialScale = arrowRadius / 0.08;
+	const lengthScale = arrowLength / 0.25;
+
+	// Push the arrow slightly beyond the end of the tube so it doesn't get buried
+	const forwardOffset = Math.max(arrowLength * 0.45, tubeRadius * 1.5);
+
+	mesh.position.copy(pos).addScaledVector(nDir, forwardOffset);
+	mesh.lookAt(mesh.position.clone().add(nDir));
+	mesh.scale.set(radialScale, radialScale, lengthScale);
+
+	this.scene.add(mesh);
+	this.junctionPoints.push(mesh);
     },
 
     clearGlow: function() {
@@ -601,11 +636,10 @@ window.VisualiserCore = {
 	    aspect: this.camera.aspect
 	};
 	
-
 	const scale = options.scale || 2;
 	
-	const recordWidth = Math.round(rect.width * scale);
-	const recordHeight = Math.round(rect.height * scale);
+	recordWidth = Math.round(rect.width * scale);
+	recordHeight = Math.round(rect.height * scale);
 	
 	this.renderer.setPixelRatio(1);
 	this.renderer.setSize(recordWidth, recordHeight, false);
