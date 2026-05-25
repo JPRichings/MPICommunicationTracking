@@ -531,81 +531,148 @@ window.VisualiserCore = {
     // ==========================================
     // UI RECORDING (MediaRecorder API)
     // ==========================================
-    startUIRecording: function() {
-        const canvasEl = document.querySelector("#visCanvas canvas");
-        if (!canvasEl) {
-            console.error("Canvas not found! Cannot start recording.");
-            return;
-        }
+    getBestRecordingMimeType: function() {
+	const candidates = [
+            "video/mp4;codecs=avc1.640028",
+            "video/mp4",
+            "video/webm;codecs=vp9",
+            "video/webm;codecs=vp8",
+            "video/webm"
+	];
 
-        recordedChunks = [];
-        // Capture at 60 FPS
-        const stream = canvasEl.captureStream(60); 
-        
-        try {
-            // Try high-quality VP9 first
-            mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm; codecs=vp9' });
-        } catch (e) {
-            // Fallback for browsers that don't support VP9 explicitly
-            mediaRecorder = new MediaRecorder(stream); 
-        }
-
-        mediaRecorder.ondataavailable = function(event) {
-            if (event.data.size > 0) {
-                recordedChunks.push(event.data);
+	for (const type of candidates) {
+            if (window.MediaRecorder && MediaRecorder.isTypeSupported(type)) {
+		return type;
             }
-        };
+	}
+	return "";
+    },
 
-        mediaRecorder.onstop = function() {
-            const blob = new Blob(recordedChunks, { type: 'video/webm' });
+    restoreRecordingCanvasState: function() {
+	if (!this._recordingState) return;
+
+	const s = this._recordingState;
+	this.renderer.setPixelRatio(s.pixelRatio);
+	this.renderer.setSize(s.width, s.height, false);
+	this.camera.aspect = s.width / s.height;
+	this.camera.updateProjectionMatrix();
+
+	this._recordingState = null;
+    },
+
+
+    startUIRecording: function(options = {}) {
+	const canvasEl = this.renderer?.domElement || document.querySelector("#visCanvas canvas");
+	if (!canvasEl || !this.renderer || !this.camera) {
+            console.error("Canvas/renderer/camera not found. Cannot start recording.");
+            return;
+	}
+
+	const fps = options.fps || 60;
+	const recordWidth = options.width || 1920;
+	const recordHeight = options.height || 1080;
+	const bitrate = options.bitrate || 40000000; // 40 Mbps default
+	const pixelRatio = options.pixelRatio || 1;
+
+	this.recordedChunks = [];
+
+	// Save current render state so it can be restored after recording
+	const currentSize = new THREE.Vector2();
+	this.renderer.getSize(currentSize);
+
+	this._recordingState = {
+            width: currentSize.x,
+            height: currentSize.y,
+            pixelRatio: this.renderer.getPixelRatio()
+	};
+
+	// Temporarily render at export resolution
+	this.renderer.setPixelRatio(pixelRatio);
+	this.renderer.setSize(recordWidth, recordHeight, false);
+	this.camera.aspect = recordWidth / recordHeight;
+	this.camera.updateProjectionMatrix();
+
+	const stream = canvasEl.captureStream(fps);
+	const mimeType = this.getBestRecordingMimeType();
+
+	const recorderOptions = {
+            videoBitsPerSecond: bitrate
+	};
+	if (mimeType) recorderOptions.mimeType = mimeType;
+
+	try {
+            this.mediaRecorder = new MediaRecorder(stream, recorderOptions);
+	} catch (e) {
+            console.warn("Preferred recorder options failed, falling back.", e);
+            this.mediaRecorder = new MediaRecorder(stream);
+	}
+
+	this.mediaRecorder.ondataavailable = (event) => {
+            if (event.data && event.data.size > 0) {
+		this.recordedChunks.push(event.data);
+            }
+	};
+
+	this.mediaRecorder.onstop = () => {
+            const usedMime = this.mediaRecorder.mimeType || mimeType || "video/webm";
+            const ext = usedMime.includes("mp4") ? "mp4" : "webm";
+            const blob = new Blob(this.recordedChunks, { type: usedMime });
             const url = URL.createObjectURL(blob);
-            
-            // Create a hidden link to trigger the download
-            const a = document.createElement('a');
-            a.style.display = 'none';
+
+            const a = document.createElement("a");
+            a.style.display = "none";
             a.href = url;
-            a.download = `pyrite-trace-${new Date().toISOString().replace(/[:.]/g, '-')}.webm`;
+            a.download = `pyrite-trace-${new Date().toISOString().replace(/[:.]/g, "-")}.${ext}`;
             document.body.appendChild(a);
             a.click();
-            
-            setTimeout(() => {
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-            }, 100);
-        },
 
-        mediaRecorder.start();
-        
-        // Update UI state
-        const btnStart = document.getElementById("btn-rec-ui-start");
-        const btnStop = document.getElementById("btn-rec-ui-stop");
-        const statusEl = document.getElementById("recUIStatus");
-        
-        if (btnStart) btnStart.disabled = true;
-        if (btnStop) btnStop.disabled = false;
-        if (statusEl) {
-            statusEl.innerHTML = "🔴 Recording...";
+            setTimeout(() => {
+		document.body.removeChild(a);
+		URL.revokeObjectURL(url);
+            }, 100);
+
+            this.restoreRecordingCanvasState();
+	};
+
+	this.mediaRecorder.onerror = (err) => {
+            console.error("Recording error:", err);
+            this.restoreRecordingCanvasState();
+	};
+
+	this.mediaRecorder.start(250);
+
+	const btnStart = document.getElementById("btn-rec-ui-start");
+	const btnStop = document.getElementById("btn-rec-ui-stop");
+	const statusEl = document.getElementById("recUIStatus");
+
+	if (btnStart) btnStart.disabled = true;
+	if (btnStop) btnStop.disabled = false;
+	if (statusEl) {
+            statusEl.innerHTML = `🔴 Recording ${recordWidth}×${recordHeight} @ ${fps}fps`;
             statusEl.style.color = "#f85149";
-        }
+	}
     },
 
     stopUIRecording: function() {
-        if (mediaRecorder && mediaRecorder.state !== "inactive") {
-            mediaRecorder.stop();
-        }
-        
-        // Update UI state
-        const btnStart = document.getElementById("btn-rec-ui-start");
-        const btnStop = document.getElementById("btn-rec-ui-stop");
-        const statusEl = document.getElementById("recUIStatus");
-        
-        if (btnStart) btnStart.disabled = false;
-        if (btnStop) btnStop.disabled = true;
-        if (statusEl) {
-            statusEl.innerHTML = "💾 Saved!";
+	if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
+            this.mediaRecorder.stop();
+	} else {
+            this.restoreRecordingCanvasState();
+	}
+
+	const btnStart = document.getElementById("btn-rec-ui-start");
+	const btnStop = document.getElementById("btn-rec-ui-stop");
+	const statusEl = document.getElementById("recUIStatus");
+
+	if (btnStart) btnStart.disabled = false;
+	if (btnStop) btnStop.disabled = true;
+	if (statusEl) {
+            statusEl.innerHTML = "💾 Saving...";
             statusEl.style.color = "#3fb950";
-            setTimeout(() => { if (statusEl.innerHTML.includes("Saved")) statusEl.innerHTML = ""; }, 3000);
-        }
+            setTimeout(() => {
+		if (statusEl.innerHTML.includes("Saving")) statusEl.innerHTML = "";
+            }, 3000);
+	}
     },
 
     // ---------------------------------------------------------
