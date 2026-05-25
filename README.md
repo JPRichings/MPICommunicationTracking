@@ -255,6 +255,100 @@ The frontend provides:
 
 ---
 
+## Communication Visual Encoding
+
+Pyrite visualises MPI communication using a combination of geometry and colour so that both how often messages are exchanged and how large those messages are can be seen at once.
+Aggregation model
+
+During playback, events in the current time window are grouped into aggregated connections. Each connection is formed from events with the same:
+
+ - Sender
+ - Receiver
+ - MPI call type
+
+For each aggregated connection, Pyrite tracks:
+
+ - **Message count:** number of events in the current window
+ - **Total bytes:** sum of message sizes across those events
+ - **Average bytes per message:** total_bytes / message_count
+
+This allows the visualiser to represent multiple dimensions of communication at the same time, rather than reducing everything to a single scalar.
+
+### Visual channels
+
+Pyrite uses separate visual channels for different properties:
+| Visual feature |	Encodes |
+| -------------- | ------------ | 
+| Line thickness |	Aggregated message count |
+| Colour hue |	MPI communication category |
+| Colour brightness / saturation | Average message size |
+| Arrow and junction size | 	Scaled consistently with the line |
+
+
+This separation is intentional. A single combined scale makes it hard to tell whether a connection is significant because it involves:
+ - Many messages,
+ - Large messages,
+ - Or both.
+
+By splitting those signals across thickness and colour intensity, the visualisation remains easier to interpret.
+
+### MPI category colours
+
+Each MPI call is assigned a base colour by communication type:
+
+ - *Blue:* blocking point-to-point
+ - *Green:* non-blocking point-to-point
+ - *Yellow:* collectives
+ - *Red:* lifecycle events
+ - *Grey:* unknown or uncategorised events
+
+The chosen category colour provides the base hue for the connection. Pyrite then varies the brightness and saturation of that hue to reflect message size.
+
+### How to read the visualisation
+
+A connection that is:
+
+   - *Thick and bright*
+    Indicates many large messages
+   - *Thick but relatively dull*
+    Indicates many smaller messages
+   - *Thin but bright*
+    Indicates fewer messages, but each message is relatively large
+
+   - *Thin and dull*
+    Indicates low-volume traffic made up of smaller messages
+
+### Arrows and junctions
+
+Connection glyphs are scaled together:
+
+   - The tube shows the communication path
+   - The junction marks the origin
+   - The arrowhead marks the destination
+
+Arrowheads and junction markers scale with the connection radius so that they remain visible even for high-volume communications. This avoids the previous issue where large tubes could visually swallow fixed-size arrows.
+
+### Notes and limitations
+
+   - Size colouring is based on the *average bytes per message* within the current aggregated connection.
+   - Thickness is based on *message count*, not total transferred bytes.
+   	- This is a deliberate design choice: it distinguishes bursty communication from fewer high-payload transfers.
+   - Exact values should still be read from analytics or tooltips where available; the rendered view is intended to support rapid visual interpretation rather than replace numeric inspection.
+
+### Design rationale
+
+This encoding was chosen because it preserves two useful questions at once:
+
+   - How active is this communication path?
+     Answered by line thickness
+
+   - How heavy is each message on this path?
+     Answered by colour intensity
+
+In practice, this makes hotspots easier to identify during playback and helps distinguish different communication patterns that would otherwise look similar in a single-metric visualisation.
+
+---
+
 ## Running Tests
 
 ```bash
