@@ -688,19 +688,22 @@ flex:0 0 auto;
     computeConnectionStyle: function(callName, msgCount, totalBytes, intraNode = false) {
 	const cat = MPI_CATEGORIES[callName] || DEFAULT_CATEGORY;
 
-	// Keep your current thickness logic based on aggregated count
-	const thick = 1 + Math.log10(Math.max(1, msgCount));
+	const safeCount = Math.max(1, Number(msgCount) || 0);
+	const safeTotalBytes = Math.max(0, Number(totalBytes) || 0);
+	const avgBytes = safeTotalBytes / safeCount;
 
-	// Use average bytes/message as the "message size" metric
-	const avgBytes = (msgCount > 0) ? (totalBytes / msgCount) : 0;
+	// Count still controls thickness
+	const thick = 1 + Math.log10(safeCount);
 
-	// Normalise size roughly across 1B .. 1MB+
+	// Size still controls brightness/saturation
 	const sizeNorm = Math.min(1, Math.log10(avgBytes + 1) / 6.0);
-	const countNorm = Math.min(1, Math.log10(msgCount + 1) / 3.0);
+	const countNorm = Math.min(1, Math.log10(safeCount + 1) / 3.0);
 
-	const tubeRadius = (intraNode ? 0.04 : 0.12) * thick;
+	// Normalised base radius:
+	// same geometry scaling for intra-node and inter-node links
+	const baseTubeRadius = 0.08;
+	const tubeRadius = baseTubeRadius * thick;
 
-	// Preserve category hue, vary saturation/lightness by size/count
 	const color = new THREE.Color(cat.color);
 	const hsl = {};
 	color.getHSL(hsl);
@@ -711,12 +714,20 @@ flex:0 0 auto;
             Math.min(0.82, 0.33 + 0.20 * sizeNorm + 0.14 * countNorm)
 	);
 
-	const emissive = color.clone().multiplyScalar(0.10 + 0.35 * countNorm);
-	const opacity = 0.70 + 0.20 * countNorm;
+	// Optional tiny visual distinction without changing size
+	const opacity = intraNode
+            ? (0.68 + 0.18 * countNorm)
+            : (0.74 + 0.18 * countNorm);
 
+	const emissive = color.clone().multiplyScalar(0.10 + 0.35 * countNorm);
+
+	// Keep arrows tied to tube size
 	const arrowRadius = Math.max(0.16, tubeRadius * 1.8);
-	const arrowLength = Math.max(0.6, tubeRadius * (4.0 + 1.5 * sizeNorm));
-	const junctionScale = Math.max(1.0, thick * (1.0 + 0.35 * sizeNorm));
+	const arrowLength = Math.max(0.6, tubeRadius * (4.5 + 1.5 * sizeNorm));
+
+	// Keep junctions tied to tube size too
+	const junctionRadius = Math.max(0.10, tubeRadius * (1.35 + 0.20 * sizeNorm));
+	const junctionScale = junctionRadius / 0.04; // sharedSphereGeo radius is 0.04
 
 	return {
             color,
@@ -727,8 +738,8 @@ flex:0 0 auto;
             arrowLength,
             junctionScale,
             avgBytes,
-            totalBytes,
-            msgCount
+            totalBytes: safeTotalBytes,
+            msgCount: safeCount
 	};
     },
 
