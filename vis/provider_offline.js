@@ -14,13 +14,34 @@ const OfflineProvider = {
     currentTime: 0, minTime: 0, maxTime: 0, timeMultiplier: 1,
     isPlaying: false, animationFrameId: null, lastFrameTime: 0, lastDynUpdate: 0,
 
+
     init: function() {
         document.getElementById("profileLoader")?.addEventListener("change", (e) => this.handleFileUpload(e));
         document.getElementById("btn-play")?.addEventListener("click", () => this.togglePlayback());
-        document.getElementById("timeSlider")?.addEventListener("input", (e) => { document.getElementById("currentTimeLabel").textContent = parseFloat(e.target.value).toFixed(3); });
-        document.getElementById("timeSlider")?.addEventListener("change", (e) => { this.pausePlayback(); this.seekToTime(parseFloat(e.target.value)); });
-        document.getElementById("speedSlider")?.addEventListener("input", (e) => { document.getElementById("speedLabel").textContent = Math.pow(10, parseFloat(e.target.value)).toFixed(3) + "x"; });
-        
+        document.getElementById("btn-step-back")?.addEventListener("click", () => this.stepToAdjacentEvent(-1));
+        document.getElementById("btn-step-forward")?.addEventListener("click", () => this.stepToAdjacentEvent(1));
+
+        document.getElementById("timeSlider")?.addEventListener("input", (e) => {
+            document.getElementById("currentTimeLabel").textContent = parseFloat(e.target.value).toFixed(3);
+        });
+
+        document.getElementById("timeSlider")?.addEventListener("change", (e) => {
+            this.pausePlayback();
+            this.seekToTime(parseFloat(e.target.value));
+        });
+
+        const speedSlider = document.getElementById("speedSlider");
+        if (speedSlider) {
+            // Allow much slower playback
+            speedSlider.min = "-6";
+            speedSlider.max = "2";
+            speedSlider.step = "0.1";
+
+            speedSlider.addEventListener("input", () => this.updateSpeedLabel());
+        }
+
+        this.updateSpeedLabel();
+
         VisualiserCore.init("visCanvas");
     },
 
@@ -67,8 +88,7 @@ const OfflineProvider = {
 	// information for the individual processes that should be collected at runtime.
 	// Really we should fix this in the parser rather than faking it here.
 	// TODO: Move to the parser.
-        
-	if (topology.length === 0) {
+	if (topology.length === 0 && totalRanks > 0) {
             for (let i = 0; i < totalRanks; i++) {
 		topology.push({
                     rank: i,
@@ -79,24 +99,53 @@ const OfflineProvider = {
             }
 	}
 
-	const hosts = new Map();
-
-	// --------------------------------------------------
-	// Group by hostname, then by raw chip
-	// --------------------------------------------------
+	// Normalise records, but do NOT remap chip/core when a real blueprint exists.
 	topology.forEach((rankObj, idx) => {
-            if (!Number.isFinite(rankObj.rank)) {
-		rankObj.rank = idx;
-            }
+            if (!Number.isFinite(rankObj.rank)) rankObj.rank = idx;
+            if (!Number.isFinite(rankObj.chip)) rankObj.chip = 0;
+            if (!Number.isFinite(rankObj.core)) rankObj.core = 0;
 
             let host = (typeof rankObj.hostname === "string") ? rankObj.hostname.trim() : "";
-            if (!host) host = "node-0";
+            if (!host) host = `node-${idx}`;
             rankObj.hostname = host;
+	});
 
+	const bp = this.parsedData.hardware_blueprint;
+
+	const hasFlatBlueprint =
+            bp &&
+            typeof bp === "object" &&
+            !Array.isArray(bp) &&
+            Object.keys(bp).some(k => k !== "metadata" && k !== "cabinets" && bp[k] && typeof bp[k] === "object");
+
+	const hasCabinetBladeBlueprint =
+            bp &&
+            Array.isArray(bp.cabinets) &&
+            bp.cabinets.some(c =>
+			     Array.isArray(c.racks) &&
+			     c.racks.some(r =>
+					  Array.isArray(r.blades) &&
+					  r.blades.some(b => Array.isArray(b.nodes) && b.nodes.length > 0)
+					 )
+			    );
+
+	// If a usable blueprint already exists, KEEP IT.
+	if (hasFlatBlueprint || hasCabinetBladeBlueprint) {
+            console.log("Using provided hardware blueprint; topology inference skipped.");
+            return;
+	}
+
+	// --------------------------------------------------
+	// No usable blueprint present: infer a process layout
+	// from the observed topology only.
+	// --------------------------------------------------
+	const hosts = new Map();
+
+	topology.forEach((rankObj) => {
+            const host = rankObj.hostname;
             const rawChip = Number.isFinite(rankObj.chip) ? rankObj.chip : 0;
             const rawCore = Number.isFinite(rankObj.core) ? rankObj.core : rankObj.rank;
 
-            // Preserve original values for debugging/reference
             rankObj.raw_chip = rawChip;
             rankObj.raw_core = rawCore;
 
@@ -123,26 +172,11 @@ const OfflineProvider = {
 							 a.hostName.localeCompare(b.hostName, undefined, { numeric: true, sensitivity: "base" })
 							);
 
-	// --------------------------------------------------
-	// For each host, infer a dense visual topology
-	//
-	//    - visual chip IDs become 0..N-1
-	//    - visual core IDs become 0..K-1 within each chip
-	//
-	// This avoids sparse/global raw IDs turning into
-	// 128-core processors, 9 chips, etc.
-	// --------------------------------------------------
 	hostList.forEach((hostObj) => {
-            const chipEntries = Array.from(hostObj.chipGroups.entries()).sort((a, b) => {
-		const aChip = Number.isFinite(a[0]) ? a[0] : 0;
-		const bChip = Number.isFinite(b[0]) ? b[0] : 0;
-		return aChip - bChip;
-            });
-
+            const chipEntries = Array.from(hostObj.chipGroups.entries()).sort((a, b) => a[0] - b[0]);
             let maxRanksOnAnyChip = 0;
 
             chipEntries.forEach(([rawChip, chipRanks], visualChipIdx) => {
-		// Sort deterministically by raw core, then rank
 		chipRanks.sort((a, b) => {
                     const ac = Number.isFinite(a.raw_core) ? a.raw_core : a.rank;
                     const bc = Number.isFinite(b.raw_core) ? b.raw_core : b.rank;
@@ -150,35 +184,19 @@ const OfflineProvider = {
                     return a.rank - b.rank;
 		});
 
-		// Dense remap within this chip.
-		// Even if raw cores are global/sparse/non-contiguous, the display stays sensible.
 		chipRanks.forEach((rankObj, visualCoreIdx) => {
                     rankObj.chip = visualChipIdx;
                     rankObj.core = visualCoreIdx;
 		});
 
-		if (chipRanks.length > maxRanksOnAnyChip) {
-                    maxRanksOnAnyChip = chipRanks.length;
-		}
+		maxRanksOnAnyChip = Math.max(maxRanksOnAnyChip, chipRanks.length);
             });
 
             hostObj.inferredCpuCount = Math.max(1, chipEntries.length);
             hostObj.inferredCoresPerCpu = Math.max(1, maxRanksOnAnyChip);
 	});
 
-	// --------------------------------------------------
-	// Build/update a flat blueprint that
-	// VisualiserCore.buildTopology() understands
-	// --------------------------------------------------
-	const existingBp = this.parsedData.hardware_blueprint;
-	const existingFlatBlueprint =
-            existingBp &&
-            typeof existingBp === "object" &&
-            !Array.isArray(existingBp) &&
-            !Array.isArray(existingBp.cabinets);
-
 	const cols = Math.ceil(Math.sqrt(hostList.length || 1));
-	const rows = Math.ceil((hostList.length || 1) / cols);
 	const hostSpacing = 18;
 
 	const flatBlueprint = {
@@ -191,18 +209,10 @@ const OfflineProvider = {
             const col = index % cols;
             const row = Math.floor(index / cols);
 
-            const existingHostEntry = existingFlatBlueprint ? existingBp[hostObj.hostName] : null;
-
             flatBlueprint[hostObj.hostName] = {
-		x: Number.isFinite(existingHostEntry?.x)
-                    ? existingHostEntry.x
-                    : (col - (cols - 1) / 2) * hostSpacing,
-		y: Number.isFinite(existingHostEntry?.y)
-                    ? existingHostEntry.y
-                    : 0,
-		z: Number.isFinite(existingHostEntry?.z)
-                    ? existingHostEntry.z
-                    : (row - (rows - 1) / 2) * hostSpacing,
+		x: (col - (cols - 1) / 2) * hostSpacing,
+		y: 0,
+		z: (row - (Math.ceil(hostList.length / cols) - 1) / 2) * hostSpacing,
 		cpus: hostObj.inferredCpuCount,
 		cores_per_cpu: hostObj.inferredCoresPerCpu
             };
@@ -215,14 +225,11 @@ const OfflineProvider = {
             console.log(
 		h.hostName,
 		`chips=${h.inferredCpuCount}`,
-		`max-ranks-per-chip=${h.inferredCoresPerCpu}`,
-		Array.from(h.chipGroups.entries()).map(([chip, ranks]) => ({
-                    rawChip: chip,
-                    ranks: ranks.length
-		}))
+		`max-ranks-per-chip=${h.inferredCoresPerCpu}`
             );
 	});
     },
+
 
     initDashboard: function() {
         this.pausePlayback();
@@ -253,6 +260,7 @@ const OfflineProvider = {
 
         this.seekToTime(this.minTime).catch(err => { console.error(err); this.pausePlayback(); });
     },
+
 
     ensureChunkLoadedForTime: async function(time) {
         if (!this.parsedData?.chunks || !this.uploadedFilePointer) return;
@@ -337,8 +345,9 @@ const OfflineProvider = {
     },
 
     getActiveEventsForWindow: function() {
-        const raw = parseFloat(document.getElementById("speedSlider")?.value || "0");
-        const winSize = Math.min(0.2, 0.05 * Math.pow(10, raw));
+        const speed = this.getSpeedMultiplier();
+
+        const winSize = Math.min(0.2, Math.max(1e-9, 0.05 * speed));
         const minWin = this.currentTime - winSize;
         const minCollWin = this.currentTime - Math.max(winSize * 8.0, 0.5);
 
@@ -374,6 +383,111 @@ const OfflineProvider = {
         return activeEvents.reverse();
     },
 
+
+    getSpeedRaw: function() {
+        return parseFloat(document.getElementById("speedSlider")?.value || "0");
+    },
+
+    getSpeedMultiplier: function() {
+        return Math.pow(10, this.getSpeedRaw());
+    },
+
+    formatSpeedMultiplier: function(mult) {
+        if (!Number.isFinite(mult) || mult <= 0) return "0x";
+        if (mult >= 0.01 && mult < 1000) return `${mult.toFixed(3)}x`;
+        return `${mult.toExponential(2)}x`;
+    },
+
+    updateSpeedLabel: function() {
+        const speedLabel = document.getElementById("speedLabel");
+        if (speedLabel) {
+            speedLabel.textContent = this.formatSpeedMultiplier(this.getSpeedMultiplier());
+        }
+    },
+
+    findFirstEventAfter: function(timeline, time) {
+        let l = 0, r = timeline.length - 1;
+        let ans = -1;
+
+        while (l <= r) {
+            const m = (l + r) >> 1;
+            if (timeline[m].time > time) {
+                ans = m;
+                r = m - 1;
+            } else {
+                l = m + 1;
+            }
+        }
+
+        return ans;
+    },
+
+    findLastEventBefore: function(timeline, time) {
+        let l = 0, r = timeline.length - 1;
+        let ans = -1;
+
+        while (l <= r) {
+            const m = (l + r) >> 1;
+            if (timeline[m].time < time) {
+                ans = m;
+                l = m + 1;
+            } else {
+                r = m - 1;
+            }
+        }
+
+        return ans;
+    },
+
+    stepToAdjacentEvent: async function(direction) {
+        this.pausePlayback();
+
+        if (!this.parsedData?.chunks || !this.uploadedFilePointer) return;
+
+        const chunks = this.parsedData.chunks;
+        const EPS = 1e-12;
+
+        await this.ensureChunkLoadedForTime(this.currentTime);
+
+        let timeline = this.parsedData.timeline || [];
+        let idx = (direction > 0)
+            ? this.findFirstEventAfter(timeline, this.currentTime + EPS)
+            : this.findLastEventBefore(timeline, this.currentTime - EPS);
+
+        if (idx !== -1) {
+            await this.seekToTime(timeline[idx].time);
+            return;
+        }
+
+        let chunkIndex = chunks.findIndex(c => this.currentTime <= c.t_end);
+        if (chunkIndex === -1) chunkIndex = chunks.length - 1;
+
+        const neighbourIndex = (direction > 0)
+            ? Math.min(chunks.length - 1, chunkIndex + 1)
+            : Math.max(0, chunkIndex - 1);
+
+        if (neighbourIndex !== chunkIndex) {
+            const probeTime = (direction > 0)
+                ? chunks[neighbourIndex].t_start
+                : chunks[neighbourIndex].t_end;
+
+            await this.ensureChunkLoadedForTime(probeTime);
+
+            timeline = this.parsedData.timeline || [];
+            idx = (direction > 0)
+                ? this.findFirstEventAfter(timeline, this.currentTime + EPS)
+                : this.findLastEventBefore(timeline, this.currentTime - EPS);
+
+            if (idx !== -1) {
+                await this.seekToTime(timeline[idx].time);
+                return;
+            }
+        }
+
+        await this.seekToTime(direction > 0 ? this.maxTime : this.minTime);
+    },
+
+
     togglePlayback: function() {
         this.isPlaying = !this.isPlaying;
         VisualiserCore.isDecayEnabled = this.isPlaying;
@@ -395,8 +509,8 @@ const OfflineProvider = {
         if (!this.isPlaying) return;
         const dt = Math.min((timestamp - this.lastFrameTime) / 1000, 0.05);
         this.lastFrameTime = timestamp;
-        
-        const speed = Math.pow(10, parseFloat(document.getElementById("speedSlider")?.value || "0"));
+       
+        const speed = this.getSpeedMultiplier();
         let nextTime = this.currentTime + (dt * this.timeMultiplier * speed);
 
         if (nextTime >= this.maxTime) { await this.seekToTime(this.maxTime); this.pausePlayback(); return; }

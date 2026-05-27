@@ -208,46 +208,110 @@ window.VisualiserCore = {
         const groupBoxes = [];
         const boxW = 7, boxH = 11, boxD = 9;
 
-        if (hardwareBlueprint) {
-            const bp = hardwareBlueprint;
-            let currentCabX = 0;
-            if (bp.cabinets && Array.isArray(bp.cabinets)) {
-                bp.cabinets.forEach(cabinet => {
-                    let currentRackX = currentCabX;
-                    if (cabinet.racks && Array.isArray(cabinet.racks)) {
-                        cabinet.racks.forEach(rack => {
-                            let rMinX = Infinity, rMaxX = -Infinity, rMinY = Infinity, rMaxY = -Infinity;
-                            if (rack.blades && Array.isArray(rack.blades)) {
-                                rack.blades.forEach((blade, bIdx) => {
-                                    let bMinX = Infinity, bMaxX = -Infinity, bMinY = Infinity, bMaxY = -Infinity;
-                                    if (blade.nodes && Array.isArray(blade.nodes)) {
-                                        blade.nodes.forEach((node, nIdx) => {
-                                            const absoluteX = currentRackX + (nIdx * 8); 
-                                            const absoluteY = bIdx * 12; 
-                                            nodesMap[node.hostname] = { x: absoluteX, y: absoluteY, z: 0, ranks: [], cpus: node.cpus || 1, coresPerCpu: node.cores_per_cpu || 1 };
-                                            if (absoluteX < bMinX) bMinX = absoluteX; if (absoluteX > bMaxX) bMaxX = absoluteX;
-                                            if (absoluteY < bMinY) bMinY = absoluteY; if (absoluteY > bMaxY) bMaxY = absoluteY;
-                                            if (absoluteX < rMinX) rMinX = absoluteX; if (absoluteX > rMaxX) rMaxX = absoluteX;
-                                            if (absoluteY < rMinY) rMinY = absoluteY; if (absoluteY > rMaxY) rMaxY = absoluteY;
-                                        });
-                                    }
-                                    if (bMinX !== Infinity) groupBoxes.push({ type: 'blade', x: bMinX + (bMaxX - bMinX) / 2, y: bMinY, z: 0, w: (bMaxX - bMinX) + boxW + 1.5, h: boxH + 1.5, d: boxD + 1.5 });
-                                });
-                            }
-                            if (rMinX !== Infinity) {
-                                groupBoxes.push({ type: 'chassis', x: rMinX + (rMaxX - rMinX) / 2, y: rMinY + (rMaxY - rMinY) / 2, z: 0, w: (rMaxX - rMinX) + boxW + 5, h: (rMaxY - rMinY) + boxH + 5, d: boxD + 5 });
-                                currentRackX += (rMaxX - rMinX) + 25; 
-                            }
-                        });
-                    }
-                    currentCabX = currentRackX + 40; 
-                });
-            } else {
-                Object.keys(bp).forEach(host => {
-                    if (host !== "cabinets" && host !== "metadata") nodesMap[host] = { ranks: [], x: bp[host].x || 0, y: bp[host].y || 0, z: bp[host].z || 0, cpus: bp[host].cpus || 1, coresPerCpu: bp[host].cores_per_cpu || 1 };
-                });
-            }
-        }
+	if (hardwareBlueprint) {
+	    const bp = hardwareBlueprint;
+
+	    if (bp.cabinets && Array.isArray(bp.cabinets)) {
+		bp.cabinets.forEach(cabinet => {
+		    const cabX = Number.isFinite(cabinet.x) ? cabinet.x : 0;
+		    const cabY = Number.isFinite(cabinet.y) ? cabinet.y : 0;
+		    const cabZ = Number.isFinite(cabinet.z) ? cabinet.z : 0;
+
+		    if (cabinet.racks && Array.isArray(cabinet.racks)) {
+			cabinet.racks.forEach(rack => {
+			    const rackX = cabX + (Number.isFinite(rack.x_offset) ? rack.x_offset : 0);
+			    const rackZ = cabZ + (Number.isFinite(rack.z_offset) ? rack.z_offset : 0);
+
+			    let rMinX = Infinity, rMaxX = -Infinity;
+			    let rMinY = Infinity, rMaxY = -Infinity;
+			    let rMinZ = Infinity, rMaxZ = -Infinity;
+
+			    if (rack.blades && Array.isArray(rack.blades)) {
+				rack.blades.forEach((blade, bIdx) => {
+				    const bladeY = cabY + (Number.isFinite(blade.y_offset) ? blade.y_offset : (bIdx * 12));
+
+				    let bMinX = Infinity, bMaxX = -Infinity;
+				    let bMinY = Infinity, bMaxY = -Infinity;
+				    let bMinZ = Infinity, bMaxZ = -Infinity;
+
+				    if (blade.nodes && Array.isArray(blade.nodes)) {
+					blade.nodes.forEach((node, nIdx) => {
+					    const nodeX = rackX + (
+						Number.isFinite(node.x_offset)
+						    ? node.x_offset
+						    : (Number.isFinite(node.slot) ? node.slot * 12 : nIdx * 8)
+					    );
+					    const nodeY = bladeY;
+					    const nodeZ = rackZ + (Number.isFinite(node.z_offset) ? node.z_offset : 0);
+
+					    nodesMap[node.hostname] = {
+						x: nodeX,
+						y: nodeY,
+						z: nodeZ,
+						ranks: [],
+						cpus: Number.isFinite(node.cpus) ? node.cpus : 1,
+						coresPerCpu: Number.isFinite(node.cores_per_cpu) ? node.cores_per_cpu : 1
+					    };
+
+					    bMinX = Math.min(bMinX, nodeX);
+					    bMaxX = Math.max(bMaxX, nodeX);
+					    bMinY = Math.min(bMinY, nodeY);
+					    bMaxY = Math.max(bMaxY, nodeY);
+					    bMinZ = Math.min(bMinZ, nodeZ);
+					    bMaxZ = Math.max(bMaxZ, nodeZ);
+
+					    rMinX = Math.min(rMinX, nodeX);
+					    rMaxX = Math.max(rMaxX, nodeX);
+					    rMinY = Math.min(rMinY, nodeY);
+					    rMaxY = Math.max(rMaxY, nodeY);
+					    rMinZ = Math.min(rMinZ, nodeZ);
+					    rMaxZ = Math.max(rMaxZ, nodeZ);
+					});
+				    }
+
+				    if (bMinX !== Infinity) {
+					groupBoxes.push({
+					    type: "blade",
+					    x: (bMinX + bMaxX) / 2,
+					    y: (bMinY + bMaxY) / 2,
+					    z: (bMinZ + bMaxZ) / 2,
+					    w: (bMaxX - bMinX) + boxW + 1.5,
+					    h: (bMaxY - bMinY) + boxH + 1.5,
+					    d: (bMaxZ - bMinZ) + boxD + 1.5
+					});
+				    }
+				});
+			    }
+
+			    if (rMinX !== Infinity) {
+				groupBoxes.push({
+				    type: "chassis",
+				    x: (rMinX + rMaxX) / 2,
+				    y: (rMinY + rMaxY) / 2,
+				    z: (rMinZ + rMaxZ) / 2,
+				    w: (rMaxX - rMinX) + boxW + 5,
+				    h: (rMaxY - rMinY) + boxH + 5,
+				    d: (rMaxZ - rMinZ) + boxD + 5
+				});
+			    }
+			});
+		    }
+		});
+	    } else {
+		Object.keys(bp).forEach(host => {
+		    if (host !== "cabinets" && host !== "metadata") {
+			nodesMap[host] = {
+			    ranks: [],
+			    x: Number.isFinite(bp[host].x) ? bp[host].x : 0,
+			    y: Number.isFinite(bp[host].y) ? bp[host].y : 0,
+			    z: Number.isFinite(bp[host].z) ? bp[host].z : 0,
+			    cpus: Number.isFinite(bp[host].cpus) ? bp[host].cpus : 1,
+			    coresPerCpu: Number.isFinite(bp[host].cores_per_cpu) ? bp[host].cores_per_cpu : 1
+			};
+		    }
+		});
+	    }
+	}
 
         groupBoxes.forEach(g => {
             const geo = new THREE.BoxGeometry(g.w, g.h, g.d);
