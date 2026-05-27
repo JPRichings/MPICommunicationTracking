@@ -345,44 +345,59 @@ const OfflineProvider = {
     },
 
     getActiveEventsForWindow: function() {
-        const speed = this.getSpeedMultiplier();
+	const speed = this.getSpeedMultiplier();
 
-        const winSize = Math.min(0.2, Math.max(1e-9, 0.05 * speed));
-        const minWin = this.currentTime - winSize;
-        const minCollWin = this.currentTime - Math.max(winSize * 8.0, 0.5);
+	// Normal event visibility window
+	const winSize = Math.min(0.2, Math.max(1e-6, 0.05 * speed));
 
-        const timeline = this.parsedData.timeline;
-        const activeEvents = [];
-        if (!timeline || timeline.length === 0) return activeEvents;
+	const collectiveWinSize = winSize;
 
-        let l = 0, r = timeline.length - 1, m = 0;
-        while (l <= r) {
+	const lifecycleWinSize = winSize;
+
+	const minWin = this.currentTime - winSize;
+	const minCollectiveWin = this.currentTime - collectiveWinSize;
+	const minLifecycleWin = this.currentTime - lifecycleWinSize;
+	const oldestRelevantTime = Math.min(minWin, minCollectiveWin, minLifecycleWin);
+
+	const timeline = this.parsedData.timeline;
+	const activeEvents = [];
+	if (!timeline || timeline.length === 0) return activeEvents;
+
+	let l = 0, r = timeline.length - 1, m = 0;
+	while (l <= r) {
             m = Math.floor((l + r) / 2);
             if (timeline[m].time <= this.currentTime) l = m + 1;
             else r = m - 1;
-        }
+	}
 
-        let captured = 0;
-        for (let i = r; i >= 0; i--) {
+	let captured = 0;
+	for (let i = r; i >= 0; i--) {
             const ev = timeline[i];
             const evTime = ev.time;
+
+            if (evTime < oldestRelevantTime) break;
+
             const callType = ev.call || ev.message_type;
-            const cat = window.VisualiserCore ? window.VisualiserCore.MPI_CATEGORIES[callType] : null || { type: "unknown" };
-            const isColl = (cat.type === "collective" || cat.type === "lifecycle");
+            const cat = window.VisualiserCore
+		? window.VisualiserCore.MPI_CATEGORIES[callType]
+		: null || { type: "unknown" };
 
-            if (evTime >= minCollWin) {
-                if (evTime >= minWin || isColl) {
-                    activeEvents.push(ev);
-                    if (++captured >= 800) break;
-                }
-            } else {
-                break;
+            const isCollective = cat.type === "collective";
+            const isLifecycle = cat.type === "lifecycle";
+
+            const isVisible =
+		evTime >= minWin ||
+		(isCollective && evTime >= minCollectiveWin) ||
+		(isLifecycle && evTime >= minLifecycleWin);
+
+            if (isVisible) {
+		activeEvents.push(ev);
+		if (++captured >= 800) break;
             }
-        }
+	}
 
-        return activeEvents.reverse();
+	return activeEvents.reverse();
     },
-
 
     getSpeedRaw: function() {
         return parseFloat(document.getElementById("speedSlider")?.value || "0");
@@ -509,7 +524,7 @@ const OfflineProvider = {
         if (!this.isPlaying) return;
         const dt = Math.min((timestamp - this.lastFrameTime) / 1000, 0.05);
         this.lastFrameTime = timestamp;
-       
+	
         const speed = this.getSpeedMultiplier();
         let nextTime = this.currentTime + (dt * this.timeMultiplier * speed);
 
