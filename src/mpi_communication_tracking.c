@@ -1626,6 +1626,92 @@ int MPI_Allgather(const void *sendbuf, int sendcount, MPI_Datatype sendtype, voi
   return rc;
 }
 
+int MPI_Ireduce(const void *sendbuf, void *recvbuf, int count, MPI_Datatype datatype, MPI_Op op, int root, MPI_Comm comm, MPI_Request *request) {
+    int rc;
+    int root_world = root;
+    int local_world = tracking_my_rank;
+    double ts = trace_timestamp();
+
+
+    if (trace_in_wrapper) return PMPI_Ireduce(sendbuf, recvbuf, count, datatype, op, root, comm, request);
+    trace_in_wrapper = 1;
+
+    rc = PMPI_Ireduce(sendbuf, recvbuf, count, datatype, op, root, comm, request);
+
+    if (rc == MPI_SUCCESS) {
+        if (comm != MPI_COMM_WORLD && comm != MPI_COMM_NULL) {
+            current_world_rank_in_comm(comm, &local_world);
+            translate_comm_rank_to_world(comm, root, 0, &root_world);
+        }
+
+        if (request != NULL && *request != MPI_REQUEST_NULL) {
+            register_pending_request(*request, MPI_REDUCE_TYPE, local_world, root_world,
+                                     count, datatype, 0, 0, root, 0, comm);
+        } else {
+            record_small_event(ts, MPI_REDUCE_TYPE, MPI_Comm_c2f(comm), 0, local_world, root_world, count, datatype);
+        }
+    }
+
+    trace_in_wrapper = 0;
+    return rc;
+}
+
+int MPI_Iallreduce(const void *sendbuf, void *recvbuf, int count, MPI_Datatype datatype, MPI_Op op, MPI_Comm comm, MPI_Request *request) {
+    int rc;
+    int local_world = tracking_my_rank;
+    double ts = trace_timestamp();
+
+    if (trace_in_wrapper) return PMPI_Iallreduce(sendbuf, recvbuf, count, datatype, op, comm, request);
+    trace_in_wrapper = 1;
+
+    rc = PMPI_Iallreduce(sendbuf, recvbuf, count, datatype, op, comm, request);
+
+    if (rc == MPI_SUCCESS) {
+        if (comm != MPI_COMM_WORLD && comm != MPI_COMM_NULL) {
+            current_world_rank_in_comm(comm, &local_world);
+        }
+
+        if (request != NULL && *request != MPI_REQUEST_NULL) {
+            register_pending_request(*request, MPI_ALLREDUCE_TYPE, local_world, local_world,
+                                     count, datatype, 0, 0, local_world, 0, comm);
+        } else {
+            record_small_event(ts, MPI_ALLREDUCE_TYPE, MPI_Comm_c2f(comm), 0, local_world, local_world, count, datatype);
+        }
+    }
+
+    trace_in_wrapper = 0;
+    return rc;
+}
+
+int MPI_Ibcast(void *buffer, int count, MPI_Datatype datatype, int root, MPI_Comm comm, MPI_Request *request) {
+    int rc;
+    int root_world = root;
+    int local_world = tracking_my_rank;
+    double ts = trace_timestamp();
+
+    if (trace_in_wrapper) return PMPI_Ibcast(buffer, count, datatype, root, comm, request);
+    trace_in_wrapper = 1;
+
+    rc = PMPI_Ibcast(buffer, count, datatype, root, comm, request);
+
+    if (rc == MPI_SUCCESS) {
+        if (comm != MPI_COMM_WORLD && comm != MPI_COMM_NULL) {
+            current_world_rank_in_comm(comm, &local_world);
+            translate_comm_rank_to_world(comm, root, 0, &root_world);
+        }
+
+        if (request != NULL && *request != MPI_REQUEST_NULL) {
+            register_pending_request(*request, MPI_BCAST_TYPE, root_world, local_world,
+                                     count, datatype, 0, 0, root, 0, comm);
+        } else {
+            record_small_event(ts, MPI_BCAST_TYPE, MPI_Comm_c2f(comm), 0, root_world, local_world, count, datatype);
+        }
+    }
+
+    trace_in_wrapper = 0;
+    return rc;
+}
+
 #ifdef MPI_TRACE_ENABLE_FORTRAN_SUPPORT
 /* -------------------------------------------------------------------------- */
 /* Fortran Helpers                                                            */
@@ -2474,6 +2560,110 @@ void mpi_allgather_(const void *sendbuf, MPI_Fint *sendcount, MPI_Fint *sendtype
 }
 void mpi_allgather__(const void *sendbuf, MPI_Fint *sendcount, MPI_Fint *sendtype, void *recvbuf, MPI_Fint *recvcount, MPI_Fint *recvtype, MPI_Fint *comm, MPI_Fint *ierr) { mpi_allgather_(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, comm, ierr); }
 void MPI_ALLGATHER(const void *sendbuf, MPI_Fint *sendcount, MPI_Fint *sendtype, void *recvbuf, MPI_Fint *recvcount, MPI_Fint *recvtype, MPI_Fint *comm, MPI_Fint *ierr) { mpi_allgather_(sendbuf, sendcount, sendtype, recvbuf, recvcount, recvtype, comm, ierr); }
+
+void mpi_ireduce_(const void *sendbuf, void *recvbuf, MPI_Fint *count, MPI_Fint *datatype, MPI_Fint *op, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *request, MPI_Fint *ierr) {
+    if (trace_in_wrapper) { pmpi_ireduce_(sendbuf, recvbuf, count, datatype, op, root, comm, request, ierr); return; }
+    trace_in_wrapper = 1;
+
+    int local_world = tracking_my_rank;
+    int root_world = (int)*root;
+    double ts = trace_timestamp();
+
+    pmpi_ireduce_(sendbuf, recvbuf, count, datatype, op, root, comm, request, ierr);
+
+    if (*ierr == MPI_SUCCESS) {
+        MPI_Comm c_comm = PMPI_Comm_f2c(*comm);
+        MPI_Datatype c_datatype = PMPI_Type_f2c(*datatype);
+        
+        if (c_comm != MPI_COMM_WORLD && c_comm != MPI_COMM_NULL) {
+            current_world_rank_in_comm(c_comm, &local_world);
+            translate_comm_rank_to_world(c_comm, (int)*root, 0, &root_world);
+        }
+
+        if (request != NULL) {
+            MPI_Request c_req = PMPI_Request_f2c(*request);
+            if (c_req != MPI_REQUEST_NULL) {
+                register_pending_request(c_req, MPI_REDUCE_TYPE, local_world, root_world,
+                                         (int)*count, c_datatype, 0, 0, (int)*root, 0, c_comm);
+            } else {
+                record_small_event(ts, MPI_REDUCE_TYPE, (int)*comm, 0, local_world, root_world, (int)*count, c_datatype);
+            }
+        }
+    }
+    trace_in_wrapper = 0;
+}
+void mpi_ireduce__(const void *sendbuf, void *recvbuf, MPI_Fint *count, MPI_Fint *datatype, MPI_Fint *op, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *request, MPI_Fint *ierr) { mpi_ireduce_(sendbuf, recvbuf, count, datatype, op, root, comm, request, ierr); }
+void MPI_IREDUCE(const void *sendbuf, void *recvbuf, MPI_Fint *count, MPI_Fint *datatype, MPI_Fint *op, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *request, MPI_Fint *ierr) { mpi_ireduce_(sendbuf, recvbuf, count, datatype, op, root, comm, request, ierr); }
+
+
+/* --- IALLREDUCE --- */
+void mpi_iallreduce_(const void *sendbuf, void *recvbuf, MPI_Fint *count, MPI_Fint *datatype, MPI_Fint *op, MPI_Fint *comm, MPI_Fint *request, MPI_Fint *ierr) {
+    if (trace_in_wrapper) { pmpi_iallreduce_(sendbuf, recvbuf, count, datatype, op, comm, request, ierr); return; }
+    trace_in_wrapper = 1;
+
+    int local_world = tracking_my_rank;
+    double ts = trace_timestamp();
+
+    pmpi_iallreduce_(sendbuf, recvbuf, count, datatype, op, comm, request, ierr);
+
+    if (*ierr == MPI_SUCCESS) {
+        MPI_Comm c_comm = PMPI_Comm_f2c(*comm);
+        MPI_Datatype c_datatype = PMPI_Type_f2c(*datatype);
+        
+        if (c_comm != MPI_COMM_WORLD && c_comm != MPI_COMM_NULL) {
+            current_world_rank_in_comm(c_comm, &local_world);
+        }
+
+        if (request != NULL) {
+            MPI_Request c_req = PMPI_Request_f2c(*request);
+            if (c_req != MPI_REQUEST_NULL) {
+                register_pending_request(c_req, MPI_ALLREDUCE_TYPE, local_world, local_world,
+                                         (int)*count, c_datatype, 0, 0, local_world, 0, c_comm);
+            } else {
+                record_small_event(ts, MPI_ALLREDUCE_TYPE, (int)*comm, 0, local_world, local_world, (int)*count, c_datatype);
+            }
+        }
+    }
+    trace_in_wrapper = 0;
+}
+void mpi_iallreduce__(const void *sendbuf, void *recvbuf, MPI_Fint *count, MPI_Fint *datatype, MPI_Fint *op, MPI_Fint *comm, MPI_Fint *request, MPI_Fint *ierr) { mpi_iallreduce_(sendbuf, recvbuf, count, datatype, op, comm, request, ierr); }
+void MPI_IALLREDUCE(const void *sendbuf, void *recvbuf, MPI_Fint *count, MPI_Fint *datatype, MPI_Fint *op, MPI_Fint *comm, MPI_Fint *request, MPI_Fint *ierr) { mpi_iallreduce_(sendbuf, recvbuf, count, datatype, op, comm, request, ierr); }
+
+
+/* --- IBCAST --- */
+void mpi_ibcast_(void *buffer, MPI_Fint *count, MPI_Fint *datatype, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *request, MPI_Fint *ierr) {
+    if (trace_in_wrapper) { pmpi_ibcast_(buffer, count, datatype, root, comm, request, ierr); return; }
+    trace_in_wrapper = 1;
+
+    int root_world = (int)*root;
+    int local_world = tracking_my_rank;
+    double ts = trace_timestamp();
+
+    pmpi_ibcast_(buffer, count, datatype, root, comm, request, ierr);
+
+    if (*ierr == MPI_SUCCESS) {
+        MPI_Comm c_comm = PMPI_Comm_f2c(*comm);
+        MPI_Datatype c_datatype = PMPI_Type_f2c(*datatype);
+        
+        if (c_comm != MPI_COMM_WORLD && c_comm != MPI_COMM_NULL) {
+            current_world_rank_in_comm(c_comm, &local_world);
+            translate_comm_rank_to_world(c_comm, (int)*root, 0, &root_world);
+        }
+
+        if (request != NULL) {
+            MPI_Request c_req = PMPI_Request_f2c(*request);
+            if (c_req != MPI_REQUEST_NULL) {
+                register_pending_request(c_req, MPI_BCAST_TYPE, root_world, local_world,
+                                         (int)*count, c_datatype, 0, 0, (int)*root, 0, c_comm);
+            } else {
+                record_small_event(ts, MPI_BCAST_TYPE, (int)*comm, 0, root_world, local_world, (int)*count, c_datatype);
+            }
+        }
+    }
+    trace_in_wrapper = 0;
+}
+void mpi_ibcast__(void *buffer, MPI_Fint *count, MPI_Fint *datatype, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *request, MPI_Fint *ierr) { mpi_ibcast_(buffer, count, datatype, root, comm, request, ierr); }
+void MPI_IBCAST(void *buffer, MPI_Fint *count, MPI_Fint *datatype, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *request, MPI_Fint *ierr) { mpi_ibcast_(buffer, count, datatype, root, comm, request, ierr); }
 
 void mpi_cancel_(MPI_Fint *request, MPI_Fint *ierr) {
   MPI_Request c_req = (request != NULL) ? PMPI_Request_f2c(*request) : MPI_REQUEST_NULL;

@@ -149,6 +149,9 @@ extern "C" {
   extern void pmpi_testall_(MPI_Fint *count, MPI_Fint array_of_requests[], int *flag, MPI_Fint array_of_statuses[], MPI_Fint *ierr);
   extern void pmpi_testany_(MPI_Fint *count, MPI_Fint array_of_requests[], MPI_Fint *index, int *flag, MPI_Fint *status, MPI_Fint *ierr);
   extern void pmpi_testsome_(MPI_Fint *incount, MPI_Fint array_of_requests[], MPI_Fint *outcount, MPI_Fint array_of_indices[], MPI_Fint array_of_statuses[], MPI_Fint *ierr);
+  extern void pmpi_ireduce_(const void *sendbuf, void *recvbuf, MPI_Fint *count, MPI_Fint *datatype, MPI_Fint *op, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *request, MPI_Fint *ierr);
+  extern void pmpi_iallreduce_(const void *sendbuf, void *recvbuf, MPI_Fint *count, MPI_Fint *datatype, MPI_Fint *op, MPI_Fint *comm, MPI_Fint *request, MPI_Fint *ierr);
+  extern void pmpi_ibcast_(void *buffer, MPI_Fint *count, MPI_Fint *datatype, MPI_Fint *root, MPI_Fint *comm, MPI_Fint *request, MPI_Fint *ierr);
 
 #ifdef __cplusplus
 }
